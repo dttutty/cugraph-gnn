@@ -1,0 +1,195 @@
+name: build
+
+on:
+  push:
+    branches:
+      - "main"
+      - "release/*"
+    tags:
+      - v[0-9][0-9].[0-9][0-9].[0-9][0-9]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch used for organizing artifacts."
+        required: true
+        type: string
+      date:
+        description: "Date (YYYY-MM-DD) used for organizing artifacts."
+        required: true
+        type: string
+      sha:
+        description: "Full git commit SHA to check out."
+        required: true
+        type: string
+      build_type:
+        description: "One of [branch, nightly, pull-request]."
+        type: string
+        default: nightly
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  conda-cpp-build:
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu8
+      script: ci/build_cpp.sh
+      sha: ${{ inputs.sha }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build:
+    needs: conda-cpp-build
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      script: ci/build_python.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build-wholegraph-torch:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      script: ci/build_python_wholegraph-torch.sh
+      sha: ${{ inputs.sha }}
+      pure-conda: true
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build-cugraph-pyg:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+      - conda-python-build-wholegraph-torch
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      script: ci/build_python_noarch.sh
+      sha: ${{ inputs.sha }}
+      pure-conda: true
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-libwholegraph:
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu8
+      package-name: libwholegraph
+      package-type: cpp
+      script: ci/build_wheel_libwholegraph.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-pylibwholegraph:
+    needs: wheel-build-libwholegraph
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu8
+      package-name: pylibwholegraph
+      package-type: python
+      script: ci/build_wheel_pylibwholegraph.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-wholegraph-torch:
+    needs: wheel-build-pylibwholegraph
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu4
+      package-name: wholegraph-torch
+      package-type: python
+      pure-wheel: true
+      script: ci/build_wheel_wholegraph-torch.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-cugraph-pyg:
+    needs: wheel-build-wholegraph-torch
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu4
+      package-name: cugraph-pyg
+      package-type: python
+      pure-wheel: true
+      script: ci/build_wheel_cugraph-pyg.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read

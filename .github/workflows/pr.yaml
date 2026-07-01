@@ -1,0 +1,307 @@
+name: pr
+
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pr-builder:
+    needs:
+      - changed-files
+      - checks
+      - conda-cpp-build
+      - conda-cpp-tests
+      - conda-python-build
+      - conda-python-build-wholegraph-torch
+      - conda-python-build-cugraph-pyg
+      - conda-python-tests
+      - wheel-build-libwholegraph
+      - wheel-build-pylibwholegraph
+      - wheel-build-wholegraph-torch
+      - wheel-build-cugraph-pyg
+      - wheel-tests-pylibwholegraph
+      - wheel-tests-wholegraph-torch
+      - wheel-tests-cugraph-pyg
+    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@main
+    if: always()
+    with:
+      needs: ${{ toJSON(needs) }}
+    permissions:
+      contents: read
+
+  changed-files:
+    uses: rapidsai/shared-workflows/.github/workflows/changed-files.yaml@main
+    with:
+      files_yaml: |
+        test_cpp:
+          - 'cpp/**'
+          - 'cmake/**'
+          - 'conda/recipes/libwholegraph/**'
+          - 'ci/build_cpp.sh'
+          - 'ci/test_cpp.sh'
+          - 'ci/run_ctests.sh'
+          - 'build.sh'
+          - 'dependencies.yaml'
+        test_python:
+          - 'python/**'
+          - 'conda/recipes/**'
+          - 'ci/run_*pytests.sh'
+          - 'ci/test_python.sh'
+          - 'ci/test_wheel*.sh'
+          - 'dependencies.yaml'
+          - '.coveragerc'
+        wheel_python:
+          - 'python/**'
+          - 'ci/build_wheel*.sh'
+          - 'ci/test_wheel*.sh'
+          - 'dependencies.yaml'
+        wheel_cpp:
+          - 'cpp/**'
+          - 'python/libwholegraph/**'
+          - 'ci/build_wheel_libwholegraph.sh'
+          - 'ci/build_wheel_pylibwholegraph.sh'
+          - 'dependencies.yaml'
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      pull-requests: read
+
+  checks:
+    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
+    with:
+      enable_check_generated_files: false
+    permissions:
+      contents: read
+
+  conda-cpp-build:
+    needs: checks
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@main
+    with:
+      build_type: pull-request
+      node_type: cpu8
+      script: ci/build_cpp.sh
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-cpp-tests:
+    needs:
+      - conda-cpp-build
+      - changed-files
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    with:
+      build_type: pull-request
+      script: ci/test_cpp.sh
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build:
+    needs: conda-cpp-build
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/build_python.sh
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build-wholegraph-torch:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/build_python_wholegraph-torch.sh
+      pure-conda: true
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build-cugraph-pyg:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+      - conda-python-build-wholegraph-torch
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/build_python_noarch.sh
+      pure-conda: true
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-tests:
+    needs:
+      - conda-python-build
+      - conda-python-build-wholegraph-torch
+      - conda-python-build-cugraph-pyg
+      - changed-files
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python
+    with:
+      build_type: pull-request
+      script: ci/test_python.sh
+      matrix_filter: map(select((.ARCH == "amd64") or ((.ARCH == "arm64") and (.CUDA_VER != "12.2.2"))))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-libwholegraph:
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_cpp || fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_python
+    needs: changed-files
+    with:
+      build_type: pull-request
+      node_type: cpu8
+      package-name: libwholegraph
+      package-type: cpp
+      script: ci/build_wheel_libwholegraph.sh
+      matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-pylibwholegraph:
+    needs: wheel-build-libwholegraph
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      build_type: pull-request
+      node_type: cpu8
+      package-name: pylibwholegraph
+      package-type: python
+      script: ci/build_wheel_pylibwholegraph.sh
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-wholegraph-torch:
+    needs:
+      - wheel-build-pylibwholegraph
+      - changed-files
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_python || fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_cpp
+    with:
+      build_type: pull-request
+      node_type: cpu4
+      package-name: wholegraph-torch
+      package-type: python
+      pure-wheel: true
+      script: ci/build_wheel_wholegraph-torch.sh
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-build-cugraph-pyg:
+    needs:
+      - wheel-build-wholegraph-torch
+      - changed-files
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_python || fromJSON(needs.changed-files.outputs.changed_file_groups).wheel_cpp
+    with:
+      build_type: pull-request
+      node_type: cpu4
+      package-name: cugraph-pyg
+      package-type: python
+      pure-wheel: true
+      script: ci/build_wheel_cugraph-pyg.sh
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-tests-pylibwholegraph:
+    needs: wheel-build-pylibwholegraph
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/test_wheel_pylibwholegraph.sh
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-tests-wholegraph-torch:
+    needs: wheel-build-wholegraph-torch
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/test_wheel_wholegraph-torch.sh
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  wheel-tests-cugraph-pyg:
+    needs: wheel-build-cugraph-pyg
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/test_wheel_cugraph-pyg.sh
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
