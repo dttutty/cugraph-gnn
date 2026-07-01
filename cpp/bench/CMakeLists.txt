@@ -22,9 +22,6 @@ function(ConfigureBench)
     ${BENCH_NAME} PRIVATE "$<BUILD_INTERFACE:${WHOLEGRAPH_SOURCE_DIR}>/src"
   )
   target_link_libraries(${BENCH_NAME} PRIVATE wholegraph raft::raft rmm::rmm pthread)
-  if(BUILD_WITH_NVSHMEM)
-    target_compile_definitions(${BENCH_NAME} PRIVATE WITH_NVSHMEM_SUPPORT)
-  endif()
   set_target_properties(
     ${BENCH_NAME}
     PROPERTIES # set target compile options
@@ -52,7 +49,7 @@ endfunction()
 
 if(BUILD_BENCHMARKS)
   ConfigureBench(
-    NAME GATHER_SCATTER_BENCH PATH wholememory_ops/gather_scatter_bench.cu
+    NAME GATHER_SCATTER_BENCH PATH wholegraph_tensor_ops/gather_scatter_bench.cu
     common/wholegraph_benchmark.cpp
   )
 

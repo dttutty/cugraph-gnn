@@ -4,7 +4,7 @@
  */
 
 #include <cmath>
-#include <wholememory/wholegraph_op.h>
+#include <wholegraph/wholegraph_op.h>
 
 #include <raft/random/rng_device.cuh>
 #include <raft/random/rng_state.hpp>
@@ -12,29 +12,29 @@
 #include "error.hpp"
 #include "logger.hpp"
 
-wholememory_error_code_t generate_random_positive_int_cpu(int64_t random_seed,
+wholegraph_error_code_t generate_random_positive_int_cpu(int64_t random_seed,
                                                           int64_t subsequence,
-                                                          wholememory_tensor_t output)
+                                                          wholegraph_tensor_t output)
 {
-  auto output_tensor_desc = *wholememory_tensor_get_tensor_description(output);
+  auto output_tensor_desc = *wholegraph_tensor_get_tensor_description(output);
   if (output_tensor_desc.dim != 1) {
-    WHOLEMEMORY_ERROR("output should be 1D tensor.");
-    return WHOLEMEMORY_INVALID_INPUT;
+    WHOLEGRAPH_ERROR("output should be 1D tensor.");
+    return WHOLEGRAPH_INVALID_INPUT;
   }
-  if (output_tensor_desc.dtype != WHOLEMEMORY_DT_INT64 &&
-      output_tensor_desc.dtype != WHOLEMEMORY_DT_INT) {
-    WHOLEMEMORY_ERROR("output should be int64 or int32 tensor.");
-    return WHOLEMEMORY_INVALID_INPUT;
+  if (output_tensor_desc.dtype != WHOLEGRAPH_DT_INT64 &&
+      output_tensor_desc.dtype != WHOLEGRAPH_DT_INT) {
+    WHOLEGRAPH_ERROR("output should be int64 or int32 tensor.");
+    return WHOLEGRAPH_INVALID_INPUT;
   }
 
-  auto* output_ptr = wholememory_tensor_get_data_pointer(output);
+  auto* output_ptr = wholegraph_tensor_get_data_pointer(output);
 
   raft::random::RngState _rngstate(random_seed, 0, raft::random::GeneratorType::GenPC);
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate(_rngstate);
   raft::random::detail::PCGenerator rng(rngstate, (uint64_t)subsequence);
 
   for (int64_t i = 0; i < output_tensor_desc.sizes[0]; i++) {
-    if (output_tensor_desc.dtype == WHOLEMEMORY_DT_INT) {
+    if (output_tensor_desc.dtype == WHOLEGRAPH_DT_INT) {
       raft::random::detail::UniformDistParams<int32_t> params;
       params.start = 0;
       params.end   = 1;
@@ -50,22 +50,22 @@ wholememory_error_code_t generate_random_positive_int_cpu(int64_t random_seed,
       static_cast<int64_t*>(output_ptr)[i] = random_num;
     }
   }
-  return WHOLEMEMORY_SUCCESS;
+  return WHOLEGRAPH_SUCCESS;
 }
 
-wholememory_error_code_t generate_exponential_distribution_negative_float_cpu(
-  int64_t random_seed, int64_t subsequence, wholememory_tensor_t output)
+wholegraph_error_code_t generate_exponential_distribution_negative_float_cpu(
+  int64_t random_seed, int64_t subsequence, wholegraph_tensor_t output)
 {
-  auto output_tensor_desc = *wholememory_tensor_get_tensor_description(output);
+  auto output_tensor_desc = *wholegraph_tensor_get_tensor_description(output);
   if (output_tensor_desc.dim != 1) {
-    WHOLEMEMORY_ERROR("output should be 1D tensor.");
-    return WHOLEMEMORY_INVALID_INPUT;
+    WHOLEGRAPH_ERROR("output should be 1D tensor.");
+    return WHOLEGRAPH_INVALID_INPUT;
   }
-  if (output_tensor_desc.dtype != WHOLEMEMORY_DT_FLOAT) {
-    WHOLEMEMORY_ERROR("output should be float.");
-    return WHOLEMEMORY_INVALID_INPUT;
+  if (output_tensor_desc.dtype != WHOLEGRAPH_DT_FLOAT) {
+    WHOLEGRAPH_ERROR("output should be float.");
+    return WHOLEGRAPH_INVALID_INPUT;
   }
-  auto* output_ptr = wholememory_tensor_get_data_pointer(output);
+  auto* output_ptr = wholegraph_tensor_get_data_pointer(output);
   raft::random::RngState _rngstate(random_seed, 0, raft::random::GeneratorType::GenPC);
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate(_rngstate);
   raft::random::detail::PCGenerator rng(rngstate, (uint64_t)subsequence);
@@ -93,5 +93,5 @@ wholememory_error_code_t generate_exponential_distribution_negative_float_cpu(
     float logk                         = (log1p(u) / log(2.0));
     static_cast<float*>(output_ptr)[i] = logk;
   }
-  return WHOLEMEMORY_SUCCESS;
+  return WHOLEGRAPH_SUCCESS;
 }

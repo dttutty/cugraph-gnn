@@ -4,40 +4,40 @@
  */
 #pragma once
 
-#include <wholememory/device_reference.cuh>
-#include <wholememory/env_func_ptrs.h>
-#include <wholememory/global_reference.h>
-#include <wholememory/tensor_description.h>
+#include <wholegraph/device_reference.cuh>
+#include <wholegraph/env_func_ptrs.h>
+#include <wholegraph/global_reference.h>
+#include <wholegraph/tensor_description.h>
 
 namespace wholegraph_ops {
-template <typename IdType, typename LocalIdType, typename WMIdType, typename WMOffsetType>
-__global__ void sample_all_kernel(wholememory_gref_t wm_csr_row_ptr,
-                                  wholememory_array_description_t wm_csr_row_ptr_desc,
-                                  wholememory_gref_t wm_csr_col_ptr,
-                                  wholememory_array_description_t wm_csr_col_ptr_desc,
+template <typename IdType, typename LocalIdType, typename WGIdType, typename WGOffsetType>
+__global__ void sample_all_kernel(wholegraph_gref_t wg_csr_row_ptr,
+                                  wholegraph_array_description_t wg_csr_row_ptr_desc,
+                                  wholegraph_gref_t wg_csr_col_ptr,
+                                  wholegraph_array_description_t wg_csr_col_ptr_desc,
                                   const IdType* input_nodes,
                                   const int input_node_count,
                                   const int* output_sample_offset,
-                                  wholememory_array_description_t output_sample_offset_desc,
-                                  WMIdType* output_dest_node_ptr,
+                                  wholegraph_array_description_t output_sample_offset_desc,
+                                  WGIdType* output_dest_node_ptr,
                                   int* output_center_localid_ptr,
                                   int64_t* output_edge_gid_ptr)
 {
   int input_idx = blockIdx.x;
   if (input_idx >= input_node_count) return;
 
-  wholememory::device_reference<WMOffsetType> wm_csr_row_ptr_dev_ref(wm_csr_row_ptr);
-  wholememory::device_reference<WMIdType> wm_csr_col_ptr_ref(wm_csr_col_ptr);
+  wholegraph::device_reference<WGOffsetType> wg_csr_row_ptr_dev_ref(wg_csr_row_ptr);
+  wholegraph::device_reference<WGIdType> wg_csr_col_ptr_ref(wg_csr_col_ptr);
 
   IdType nid         = input_nodes[input_idx];
-  int64_t start      = wm_csr_row_ptr_dev_ref[nid];
-  int64_t end        = wm_csr_row_ptr_dev_ref[nid + 1];
+  int64_t start      = wg_csr_row_ptr_dev_ref[nid];
+  int64_t end        = wg_csr_row_ptr_dev_ref[nid + 1];
   int neighbor_count = (int)(end - start);
   if (neighbor_count <= 0) return;
   int offset = output_sample_offset[input_idx];
   for (int sample_id = threadIdx.x; sample_id < neighbor_count; sample_id += blockDim.x) {
     int neighbor_idx                         = sample_id;
-    IdType gid                               = wm_csr_col_ptr_ref[start + neighbor_idx];
+    IdType gid                               = wg_csr_col_ptr_ref[start + neighbor_idx];
     output_dest_node_ptr[offset + sample_id] = gid;
     if (output_center_localid_ptr)
       output_center_localid_ptr[offset + sample_id] = (LocalIdType)input_idx;
@@ -63,9 +63,9 @@ struct ExpandWithOffsetFunc {
   }
 };
 
-template <typename WMIdType, typename DegreeType>
+template <typename WGIdType, typename DegreeType>
 struct ReduceForDegrees {
-  WMIdType* rowoffsets;
+  WGIdType* rowoffsets;
   DegreeType* in_degree_ptr;
   int length;
   __host__ __device__ auto operator()(int64_t tIdx)

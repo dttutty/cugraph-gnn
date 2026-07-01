@@ -8,6 +8,7 @@
 cmake_minimum_required(VERSION 4.0 FATAL_ERROR)
 
 include(../../cmake/rapids_config.cmake)
+include(../../cmake/python_package_prefixes.cmake)
 include(rapids-cmake)
 include(rapids-cuda)
 
@@ -24,8 +25,13 @@ project(
 SET(BUILD_TESTS OFF)
 SET(BUILD_BENCHMARKS OFF)
 SET(USE_NCCL_RUNTIME_WHEEL ON)
+if(NOT DEFINED CMAKE_INSTALL_LIBDIR)
+  set(CMAKE_INSTALL_LIBDIR lib64)
+endif()
 
-add_subdirectory(../../cpp/ libwholegraph)
+cugraph_append_python_package_cmake_prefixes()
+
+add_subdirectory(../../cpp libwholegraph)
 
 if(USE_NCCL_RUNTIME_WHEEL)
   list(APPEND rpaths "$ORIGIN/../../nvidia/nccl/lib")

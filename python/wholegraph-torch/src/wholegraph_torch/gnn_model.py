@@ -1,0 +1,212 @@
+# SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+from pylibwholegraph.utils.imports import import_optional, MissingModule
+from .graph_structure import GraphStructure
+from .embedding import WholeGraphEmbedding, WholeGraphEmbeddingModule
+from .common_options import parse_max_neighbors
+
+torch = import_optional("torch")
+
+# NOTE: using more specific 'import_optional()' than just 'torch' for import-time checks
+#       (e.g. those needed for defining base classes) can be helpful because 'torch' can appear
+#       to be available even after a 'pip uninstall torch' if any files are left behind in
+#       'site-packages/torch'.
+torch_nn = import_optional("torch.nn")
+
+framework_name = None
+
+
+def set_framework(framework: str):
+    global framework_name
+    assert framework_name is None
+    framework_name = framework
+    global SAGEConv, GATConv
+    if framework_name == "pyg":
+        global SparseTensor
+        from torch_sparse import SparseTensor
+        from torch_geometric.nn import SAGEConv, GATConv
+    elif framework_name == "wg":
+        from wg_torch.gnn.SAGEConv import SAGEConv
+        from wg_torch.gnn.GATConv import GATConv
+
+
+def create_gnn_layers(
+    in_feat_dim, hidden_feat_dim, class_count, num_layer, num_head, model_type
+):
+    gnn_layers = torch_nn.ModuleList()
+    global framework_name
+    for i in range(num_layer):
+        layer_output_dim = (
+            hidden_feat_dim // num_head if i != num_layer - 1 else class_count
+        )
+        layer_input_dim = in_feat_dim if i == 0 else hidden_feat_dim
+        mean_output = True if i == num_layer - 1 else False
+        if framework_name == "pyg":
+            if model_type == "sage":
+                gnn_layers.append(SAGEConv(layer_input_dim, layer_output_dim))
+            elif model_type == "gat":
+                concat = not mean_output
+                gnn_layers.append(
+                    GATConv(
+                        layer_input_dim, layer_output_dim, heads=num_head, concat=concat
+                    )
+                )
+            else:
+                assert model_type == "gcn"
+                gnn_layers.append(
+                    SAGEConv(layer_input_dim, layer_output_dim, root_weight=False)
+                )
+        elif framework_name == "wg":
+            if model_type == "sage":
+                gnn_layers.append(SAGEConv(layer_input_dim, layer_output_dim))
+            elif model_type == "gat":
+                gnn_layers.append(
+                    GATConv(
+                        layer_input_dim,
+                        layer_output_dim,
+                        num_heads=num_head,
+                        mean_output=mean_output,
+                    )
+                )
+            else:
+                assert model_type == "gcn"
+                gnn_layers.append(
+                    SAGEConv(layer_input_dim, layer_output_dim, aggregator="gcn")
+                )
+    return gnn_layers
+
+
+def create_sub_graph(
+    target_gid,
+    target_gid_1,
+    edge_data,
+    csr_row_ptr,
+    csr_col_ind,
+    max_num_neighbors: int,
+    add_self_loop: bool,
+):
+    global framework_name
+    if framework_name == "pyg":
+        neighboor_dst_unique_ids = csr_col_ind
+        neighboor_src_unique_ids = edge_data[1]
+        target_neighbor_count = target_gid.size()[0]
+        if add_self_loop:
+            self_loop_ids = torch.arange(
+                0,
+                target_gid_1.size()[0],
+                dtype=neighboor_dst_unique_ids.dtype,
+                device=target_gid.device,
+            )
+            edge_index = SparseTensor(
+                row=torch.cat([neighboor_src_unique_ids, self_loop_ids]).long(),
+                col=torch.cat([neighboor_dst_unique_ids, self_loop_ids]).long(),
+                sparse_sizes=(target_gid_1.size()[0], target_neighbor_count),
+            )
+        else:
+            edge_index = SparseTensor(
+                row=neighboor_src_unique_ids.long(),
+                col=neighboor_dst_unique_ids.long(),
+                sparse_sizes=(target_gid_1.size()[0], target_neighbor_count),
+            )
+        return edge_index
+    else:
+        assert framework_name == "wg"
+        return [csr_row_ptr, csr_col_ind]
+    return None
+
+
+def layer_forward(layer, x_feat, x_target_feat, sub_graph):
+    global framework_name
+    if framework_name == "pyg":
+        x_feat = layer((x_feat, x_target_feat), sub_graph)
+    elif framework_name == "wg":
+        x_feat = layer(sub_graph[0], sub_graph[1], x_feat, x_target_feat)
+    return x_feat
+
+
+if not isinstance(torch_nn, MissingModule):
+
+    class HomoGNNModel(torch_nn.Module):
+        def __init__(
+            self,
+            graph_structure: GraphStructure,
+            node_embedding: WholeGraphEmbedding,
+            args,
+        ):
+            super().__init__()
+            hidden_feat_dim = args.hiddensize
+            self.graph_structure = graph_structure
+            self.node_embedding = node_embedding
+            self.num_layer = args.layernum
+            self.hidden_feat_dim = args.hiddensize
+            num_head = args.heads if (args.model == "gat") else 1
+            assert hidden_feat_dim % num_head == 0
+            in_feat_dim = self.node_embedding.shape[1]
+            self.gnn_layers = create_gnn_layers(
+                in_feat_dim,
+                hidden_feat_dim,
+                args.classnum,
+                args.layernum,
+                num_head,
+                args.model,
+            )
+            self.mean_output = True if args.model == "gat" else False
+            self.add_self_loop = True if args.model == "gat" else False
+            self.gather_fn = WholeGraphEmbeddingModule(self.node_embedding)
+            self.dropout = args.dropout
+            self.max_neighbors = parse_max_neighbors(args.layernum, args.neighbors)
+            self.max_inference_neighbors = parse_max_neighbors(
+                args.layernum, args.inferencesample
+            )
+
+        def forward(self, ids):
+            global framework_name
+            max_neighbors = (
+                self.max_neighbors if self.training else self.max_inference_neighbors
+            )
+            ids = ids.to(self.graph_structure.csr_col_ind.dtype).cuda()
+            (
+                target_gids,
+                edge_indice,
+                csr_row_ptrs,
+                csr_col_inds,
+            ) = self.graph_structure.multilayer_sample_without_replacement(
+                ids, max_neighbors
+            )
+            x_feat = self.gather_fn(target_gids[0], force_dtype=torch.float32)
+            for i in range(self.num_layer):
+                x_target_feat = x_feat[: target_gids[i + 1].numel()]
+                sub_graph = create_sub_graph(
+                    target_gids[i],
+                    target_gids[i + 1],
+                    edge_indice[i],
+                    csr_row_ptrs[i],
+                    csr_col_inds[i],
+                    max_neighbors[self.num_layer - 1 - i],
+                    self.add_self_loop,
+                )
+                x_feat = layer_forward(
+                    self.gnn_layers[i],
+                    x_feat,
+                    x_target_feat,
+                    sub_graph,
+                )
+                if i != self.num_layer - 1:
+                    x_feat = torch_nn.functional.relu(x_feat)
+                    x_feat = torch_nn.functional.dropout(
+                        x_feat, self.dropout, training=self.training
+                    )
+
+            out_feat = x_feat
+            return out_feat
+else:
+
+    class HomoGNNModel:
+        def __init__(
+            self,
+            graph_structure: GraphStructure,
+            node_embedding: WholeGraphEmbedding,
+            args,
+        ):
+            raise ModuleNotFoundError("HomoGNNModel requires 'torch' to be installed.")

@@ -4,30 +4,30 @@
  */
 #pragma once
 
-#include <wholememory/env_func_ptrs.h>
-#include <wholememory/global_reference.h>
-#include <wholememory/tensor_description.h>
-#include <wholememory/wholememory.h>
+#include <wholegraph/env_func_ptrs.h>
+#include <wholegraph/global_reference.h>
+#include <wholegraph/tensor_description.h>
+#include <wholegraph/wholegraph.h>
 
 namespace wholegraph_ops {
 
-wholememory_error_code_t wholegraph_csr_weighted_sample_without_replacement_mapped(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
-  wholememory_gref_t wm_csr_col_ptr,
-  wholememory_array_description_t wm_csr_col_ptr_desc,
-  wholememory_gref_t wm_csr_weight_ptr,
-  wholememory_array_description_t wm_csr_weight_ptr_desc,
+wholegraph_error_code_t wholegraph_csr_weighted_sample_without_replacement_mapped(
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_col_ptr,
+  wholegraph_array_description_t wg_csr_col_ptr_desc,
+  wholegraph_gref_t wg_csr_weight_ptr,
+  wholegraph_array_description_t wg_csr_weight_ptr_desc,
   void* center_nodes,
-  wholememory_array_description_t center_nodes_desc,
+  wholegraph_array_description_t center_nodes_desc,
   int max_sample_count,
   void* output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* output_dest_memory_context,
   void* output_center_localid_memory_context,
   void* output_edge_gid_memory_context,
   unsigned long long random_seed,
-  wholememory_env_func_t* p_env_fns,
+  wholegraph_env_func_t* p_env_fns,
   cudaStream_t stream);
 
 }  // namespace wholegraph_ops

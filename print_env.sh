@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: Copyright (c) 2019-2024, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: Apache-2.0
 # Reports relevant environment information useful for diagnosing and
-# debugging issues.
+# debugging cuGraph issues.
 # Usage:
 # "./print_env.sh" - prints to stdout
 # "./print_env.sh > env.txt" - prints to file "env.txt"
@@ -11,8 +11,6 @@ print_env() {
 echo "**git***"
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]; then
 git log --decorate -n 1
-echo "**git submodules***"
-git submodule status --recursive
 else
 echo "Not inside a git repository"
 fi

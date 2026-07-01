@@ -13,15 +13,15 @@
 
 #include "error.hpp"
 
-#include <wholememory/tensor_description.h>
-#include <wholememory/wholememory.h>
+#include <wholegraph/tensor_description.h>
+#include <wholegraph/wholegraph.h>
 namespace wholegraph::bench {
 
 #define TIME_DIFF_US(TVS, TVE) \
   ((TVE.tv_sec - TVS.tv_sec) * 1000ULL * 1000ULL + (TVE.tv_usec - TVS.tv_usec))
 
 void host_random_init_integer_indices(void* indices,
-                                      wholememory_array_description_t indices_desc,
+                                      wholegraph_array_description_t indices_desc,
                                       int64_t max_indices);
 
 void host_random_partition(size_t* partition_sizes, size_t total_size, int partition_count);
@@ -92,7 +92,7 @@ struct PerformanceMeter {
 };
 
 void MultiProcessMeasurePerformance(std::function<void()> run_fn,
-                                    wholememory_comm_t& wm_comm,
+                                    wholegraph_comm_t& wg_comm,
                                     const PerformanceMeter& meter,
                                     const std::function<void()>& barrier_fn);
 

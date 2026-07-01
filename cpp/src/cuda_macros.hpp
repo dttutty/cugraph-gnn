@@ -20,7 +20,7 @@
 
 #include "error.hpp"
 
-namespace wholememory {
+namespace wholegraph {
 
 /**
  * @brief Exception thrown when a CUDA error is encountered.
@@ -38,7 +38,7 @@ struct cu_error : public raft::exception {
   explicit cu_error(std::string const& message) : raft::exception(message) {}
 };
 
-}  // namespace wholememory
+}  // namespace wholegraph
 
 /**
  * @brief Error checking macro for CUDA runtime API functions.
@@ -48,31 +48,31 @@ struct cu_error : public raft::exception {
  * exception detailing the CUDA error that occurred
  *
  */
-#define WM_CUDA_TRY(call)                                      \
+#define WG_CUDA_TRY(call)                                      \
   do {                                                         \
     cudaError_t const status = call;                           \
     if (status != cudaSuccess) {                               \
       cudaGetLastError();                                      \
       std::string msg{};                                       \
-      SET_WHOLEMEMORY_ERROR_MSG(msg,                           \
+      SET_WHOLEGRAPH_ERROR_MSG(msg,                           \
                                 "CUDA error encountered at: ", \
                                 "call='%s', Reason=%s:%s",     \
                                 #call,                         \
                                 cudaGetErrorName(status),      \
                                 cudaGetErrorString(status));   \
-      throw wholememory::cuda_error(msg);                      \
+      throw wholegraph::cuda_error(msg);                      \
     }                                                          \
   } while (0)
 
-#ifndef WM_CUDA_CHECK
-#define WM_CUDA_CHECK(call) WM_CUDA_TRY(call)
+#ifndef WG_CUDA_CHECK
+#define WG_CUDA_CHECK(call) WG_CUDA_TRY(call)
 #endif
 
 // /**
 //  * @brief check for cuda runtime API errors but log error instead of raising
 //  *        exception.
 //  */
-#define WM_CUDA_TRY_NO_THROW(call)                                 \
+#define WG_CUDA_TRY_NO_THROW(call)                                 \
   do {                                                             \
     cudaError_t const status = call;                               \
     if (cudaSuccess != status) {                                   \
@@ -85,8 +85,8 @@ struct cu_error : public raft::exception {
     }                                                              \
   } while (0)
 
-#ifndef WM_CUDA_CHECK_NO_THROW
-#define WM_CUDA_CHECK_NO_THROW(call) WM_CUDA_TRY_NO_THROW(call)
+#ifndef WG_CUDA_CHECK_NO_THROW
+#define WG_CUDA_CHECK_NO_THROW(call) WG_CUDA_TRY_NO_THROW(call)
 #endif
 
 /**
@@ -97,7 +97,7 @@ struct cu_error : public raft::exception {
  * exception detailing the CU error that occurred
  *
  */
-#define WM_CU_TRY(call)                                                       \
+#define WG_CU_TRY(call)                                                       \
   do {                                                                        \
     CUresult const status = call;                                             \
     if (status != CUDA_SUCCESS) {                                             \
@@ -108,25 +108,25 @@ struct cu_error : public raft::exception {
         p_err_str = "Unrecoginzed CU error num";                              \
       }                                                                       \
       std::string msg{};                                                      \
-      SET_WHOLEMEMORY_ERROR_MSG(msg,                                          \
+      SET_WHOLEGRAPH_ERROR_MSG(msg,                                          \
                                 "CU error encountered at: ",                  \
                                 "call='%s', Reason=%s:%s",                    \
                                 #call,                                        \
                                 p_err_name,                                   \
                                 p_err_str);                                   \
-      throw wholememory::cu_error(msg);                                       \
+      throw wholegraph::cu_error(msg);                                       \
     }                                                                         \
   } while (0)
 
-#ifndef WM_CU_CHECK
-#define WM_CU_CHECK(call) WM_CU_TRY(call)
+#ifndef WG_CU_CHECK
+#define WG_CU_CHECK(call) WG_CU_TRY(call)
 #endif
 
 // /**
 //  * @brief check for cuda driver API errors but log error instead of raising
 //  *        exception.
 //  */
-#define WM_CU_TRY_NO_THROW(call)                                                                   \
+#define WG_CU_TRY_NO_THROW(call)                                                                   \
   do {                                                                                             \
     CUresult const status = call;                                                                  \
     if (status != CUDA_SUCCESS) {                                                                  \
@@ -140,14 +140,14 @@ struct cu_error : public raft::exception {
     }                                                                                              \
   } while (0)
 
-#ifndef WM_CU_CHECK_NO_THROW
-#define WM_CU_CHECK_NO_THROW(call) WM_CU_TRY_NO_THROW(call)
+#ifndef WG_CU_CHECK_NO_THROW
+#define WG_CU_CHECK_NO_THROW(call) WG_CU_TRY_NO_THROW(call)
 #endif
 
 void set_debug_sync_mode(bool debug_sync_mode);
 
-namespace wholememory {
+namespace wholegraph {
 void debug_synchronize(const char* filename, int line, cudaStream_t stream);
 }
 
-#define WM_CUDA_DEBUG_SYNC_STREAM(S) wholememory::debug_synchronize(__FILE__, __LINE__, (S))
+#define WG_CUDA_DEBUG_SYNC_STREAM(S) wholegraph::debug_synchronize(__FILE__, __LINE__, (S))

@@ -23,25 +23,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The set of shared libraries that should be packaged differs by project.
-#
-# Capturing that here in argument-parsing to allow this build_wheel.sh
-# script to be re-used by all wheel builds in the project.
-#
-EXCLUDE_ARGS=(
-    --exclude libcuda.so.1
-    --exclude "libnccl.so.*"
-    --exclude libnvidia-ml.so.1
-    --exclude librapids_logger.so
-    --exclude librmm.so
-)
-
-if [[ "${package_name}" != "libwholegraph" ]]; then
-    EXCLUDE_ARGS+=(
-        --exclude libwholegraph.so
-    )
-fi
-
 source rapids-configure-sccache
 source rapids-date-string
 source rapids-init-pip
@@ -50,8 +31,6 @@ export SCCACHE_S3_PREPROCESSOR_CACHE_KEY_PREFIX="${package_name}/${RAPIDS_CONDA_
 export SCCACHE_S3_USE_PREPROCESSOR_CACHE_MODE=true
 
 rapids-generate-version > ./VERSION
-
-RAPIDS_PY_CUDA_SUFFIX="$(rapids-wheel-ctk-name-gen "${RAPIDS_CUDA_VERSION}")"
 
 cd "${package_dir}"
 
@@ -84,19 +63,37 @@ fi
 # results in an error from 'pip wheel' when set and --build-constraint is also passed
 unset PIP_CONSTRAINT
 rapids-pip-retry wheel \
-  "${RAPIDS_PIP_WHEEL_ARGS[@]}" \
-  .
+    "${RAPIDS_PIP_WHEEL_ARGS[@]}" \
+    .
 
 sccache --show-adv-stats
 sccache --stop-server >/dev/null 2>&1 || true
 
-# pure-python packages should be marked as pure, and not have auditwheel run on them.
-if [[ ${package_name} == "cugraph-pyg" ]]; then
-    cp dist/* "${RAPIDS_WHEEL_BLD_OUTPUT_DIR}/"
-else
-    # repair wheels and write to the location that artifact-uploading code expects to find them
-    python -m auditwheel repair \
-        "${EXCLUDE_ARGS[@]}" \
-        -w "${RAPIDS_WHEEL_BLD_OUTPUT_DIR}" \
-        dist/*
+EXCLUDE_ARGS=(
+  --exclude "libraft.so"
+)
+
+# Avoid picking up dependencies on CUDA wheels that come through
+# transitively from 'libraft'.
+#
+# 'libraft' wheels are responsible for carrying a runtime dependency on
+# these based on RAFT's needs.
+EXCLUDE_ARGS+=(
+  --exclude "libcublas.so.*"
+  --exclude "libcublasLt.so.*"
+  --exclude "libcurand.so.*"
+  --exclude "libcusolver.so.*"
+  --exclude "libcusparse.so.*"
+  --exclude "libnvJitLink.so.*"
+  --exclude "librapids_logger.so"
+  --exclude "librmm.so"
+)
+
+if [[ "${package_dir}" != "python/libwholegraph" ]]; then
+    EXCLUDE_ARGS+=(
+      --exclude "libwholegraph.so"
+    )
 fi
+
+# repair wheels and write to the location that artifact-uploading code expects to find them
+python -m auditwheel repair -w "${RAPIDS_WHEEL_BLD_OUTPUT_DIR}" "${EXCLUDE_ARGS[@]}" dist/*

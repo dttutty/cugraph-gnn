@@ -6,7 +6,7 @@
 #include "cuda_macros.hpp"
 #include "error.hpp"
 #include <raft/util/integer_utils.hpp>
-#include <wholememory/tensor_description.h>
+#include <wholegraph/tensor_description.h>
 
 namespace graph_ops {
 
@@ -32,13 +32,13 @@ __global__ void AddSelfLoopKernel(const int* csr_row_ptr,
 }
 
 void csr_add_self_loop_func(int* csr_row_ptr,
-                            wholememory_array_description_t csr_row_ptr_array_desc,
+                            wholegraph_array_description_t csr_row_ptr_array_desc,
                             int* csr_col_ptr,
-                            wholememory_array_description_t csr_col_ptr_array_desc,
+                            wholegraph_array_description_t csr_col_ptr_array_desc,
                             int* output_csr_row_ptr,
-                            wholememory_array_description_t output_csr_row_ptr_array_desc,
+                            wholegraph_array_description_t output_csr_row_ptr_array_desc,
                             int* output_csr_col_ptr,
-                            wholememory_array_description_t output_csr_col_ptr_array_desc,
+                            wholegraph_array_description_t output_csr_col_ptr_array_desc,
                             cudaStream_t stream)
 {
   int target_count = csr_row_ptr_array_desc.size - 1;

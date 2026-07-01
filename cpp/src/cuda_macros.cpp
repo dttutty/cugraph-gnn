@@ -9,14 +9,14 @@
 
 #include <cuda_runtime_api.h>
 
-namespace wholememory {
+namespace wholegraph {
 
 static bool s_debug_sync_mode = false;
 
 __attribute__((constructor)) static void ReadDebugSyncModeFromEnv()
 {
   try {
-    char* debug_sync_env_str = std::getenv("WM_DEBUG_SYNC");
+    char* debug_sync_env_str = std::getenv("WG_DEBUG_SYNC");
     if (debug_sync_env_str != nullptr) {
       std::string str = debug_sync_env_str;
       std::transform(
@@ -55,4 +55,4 @@ void debug_synchronize(const char* filename, int line, cudaStream_t stream)
   }
 }
 
-}  // namespace wholememory
+}  // namespace wholegraph

@@ -35,6 +35,7 @@ requirements:
     - pandas
     - pylibcugraph =${{ minor_version }}
     - pylibwholegraph =${{ minor_version }}
+    - wholegraph-torch =${{ minor_version }}
     - python
     # This is intentionally spelled 'pytorch' (not 'pytorch-gpu' and not using build string selectors)
     # because we want it to be possible to at least install `cugraph-pyg` in an environment without a GPU,

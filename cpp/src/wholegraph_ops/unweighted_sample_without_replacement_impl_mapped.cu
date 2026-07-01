@@ -4,11 +4,11 @@
  */
 #include <cuda_runtime_api.h>
 
-#include <wholememory/env_func_ptrs.h>
-#include <wholememory/wholememory.h>
+#include <wholegraph/env_func_ptrs.h>
+#include <wholegraph/wholegraph.h>
 
 #include "unweighted_sample_without_replacement_func.cuh"
-#include "wholememory_ops/register.hpp"
+#include "wholegraph_tensor_ops/register.hpp"
 
 namespace wholegraph_ops {
 
@@ -17,31 +17,31 @@ REGISTER_DISPATCH_TWO_TYPES(UnweightedSampleWithoutReplacementCSR,
                             SINT3264,
                             SINT3264)
 
-wholememory_error_code_t wholegraph_csr_unweighted_sample_without_replacement_mapped(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
-  wholememory_gref_t wm_csr_col_ptr,
-  wholememory_array_description_t wm_csr_col_ptr_desc,
+wholegraph_error_code_t wholegraph_csr_unweighted_sample_without_replacement_mapped(
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_col_ptr,
+  wholegraph_array_description_t wg_csr_col_ptr_desc,
   void* center_nodes,
-  wholememory_array_description_t center_nodes_desc,
+  wholegraph_array_description_t center_nodes_desc,
   int max_sample_count,
   void* output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* output_dest_memory_context,
   void* output_center_localid_memory_context,
   void* output_edge_gid_memory_context,
   unsigned long long random_seed,
-  wholememory_env_func_t* p_env_fns,
+  wholegraph_env_func_t* p_env_fns,
   cudaStream_t stream)
 {
   try {
     DISPATCH_TWO_TYPES(center_nodes_desc.dtype,
-                       wm_csr_col_ptr_desc.dtype,
+                       wg_csr_col_ptr_desc.dtype,
                        UnweightedSampleWithoutReplacementCSR,
-                       wm_csr_row_ptr,
-                       wm_csr_row_ptr_desc,
-                       wm_csr_col_ptr,
-                       wm_csr_col_ptr_desc,
+                       wg_csr_row_ptr,
+                       wg_csr_row_ptr_desc,
+                       wg_csr_col_ptr,
+                       wg_csr_col_ptr_desc,
                        center_nodes,
                        center_nodes_desc,
                        max_sample_count,
@@ -54,15 +54,15 @@ wholememory_error_code_t wholegraph_csr_unweighted_sample_without_replacement_ma
                        p_env_fns,
                        stream);
 
-  } catch (const wholememory::cuda_error& rle) {
-    // WHOLEMEMORY_FAIL_NOTHROW("%s", rle.what());
-    return WHOLEMEMORY_LOGIC_ERROR;
-  } catch (const wholememory::logic_error& le) {
-    return WHOLEMEMORY_LOGIC_ERROR;
+  } catch (const wholegraph::cuda_error& rle) {
+    // WHOLEGRAPH_FAIL_NOTHROW("%s", rle.what());
+    return WHOLEGRAPH_LOGIC_ERROR;
+  } catch (const wholegraph::logic_error& le) {
+    return WHOLEGRAPH_LOGIC_ERROR;
   } catch (...) {
-    return WHOLEMEMORY_LOGIC_ERROR;
+    return WHOLEGRAPH_LOGIC_ERROR;
   }
-  return WHOLEMEMORY_SUCCESS;
+  return WHOLEGRAPH_SUCCESS;
 }
 
 }  // namespace wholegraph_ops

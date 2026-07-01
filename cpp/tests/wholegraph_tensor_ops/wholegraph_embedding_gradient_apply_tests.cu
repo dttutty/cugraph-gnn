@@ -1,0 +1,1007 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <gtest/gtest.h>
+
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <wholegraph/embedding.h>
+
+#include <cmath>
+#include <map>
+#include <string>
+
+#include "../wholegraph/wholegraph_test_utils.hpp"
+#include "embedding_test_utils.hpp"
+#include "wholegraph/env_func_ptrs.hpp"
+
+static float half_round_trip(float v) { return static_cast<float>(static_cast<__half>(v)); }
+
+static float bf16_round_trip(float v) { return static_cast<float>(static_cast<__nv_bfloat16>(v)); }
+
+struct EmbeddingBackwardTestParams {
+  EmbeddingBackwardTestParams()
+  {
+    const int64_t kDefaultEmbeddingEntryCount = 400001;
+    const int64_t kDefaultEmbeddingDim        = 127;
+    const int64_t kDefaultGatherIndiceCount   = 100005;
+    int64_t embedding_sizes[2]                = {kDefaultEmbeddingEntryCount, kDefaultEmbeddingDim};
+    embedding_description                     = wholegraph_create_matrix_desc(
+      &embedding_sizes[0], kDefaultEmbeddingDim, 0, WHOLEGRAPH_DT_FLOAT);
+    indice_description =
+      wholegraph_create_array_desc(kDefaultGatherIndiceCount, 0, WHOLEGRAPH_DT_INT64);
+    int64_t output_sizes[2] = {kDefaultGatherIndiceCount, kDefaultEmbeddingDim};
+    grad_description        = wholegraph_create_matrix_desc(
+      &output_sizes[0], kDefaultEmbeddingDim, 0, WHOLEGRAPH_DT_FLOAT);
+  }
+  bool is_large_test()
+  {
+    int64_t embedding_table_mem_size =
+      wholegraph_get_memory_element_count_from_matrix(&embedding_description) *
+      wholegraph_dtype_get_element_size(embedding_description.dtype);
+    if (embedding_table_mem_size > 2LL * 1024 * 1024 * 1024) return true;
+    return false;
+  }
+  EmbeddingBackwardTestParams& set_entry_count(int64_t entry_count)
+  {
+    embedding_description.sizes[0] = entry_count;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_embedding_dim(int embedding_dim)
+  {
+    embedding_description.sizes[1] = embedding_dim;
+    grad_description.sizes[1]      = embedding_dim;
+    embedding_description.stride   = embedding_dim;
+    if (grad_description.stride < embedding_dim) grad_description.stride = embedding_dim;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_embedding_dtype(wholegraph_dtype_t dtype)
+  {
+    embedding_description.dtype = dtype;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_indice_count(int indice_count)
+  {
+    indice_description.size   = indice_count;
+    grad_description.sizes[0] = indice_count;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_indice_dtype(wholegraph_dtype_t dtype)
+  {
+    indice_description.dtype = dtype;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_grad_stride(int stride)
+  {
+    grad_description.stride = stride;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_memory_type(wholegraph_memory_type_t mt)
+  {
+    memory_type = mt;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_memory_location(wholegraph_memory_location_t ml)
+  {
+    memory_location = ml;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_cache_memory_type(wholegraph_memory_type_t cmt)
+  {
+    cache_memory_type = cmt;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_cache_memory_location(wholegraph_memory_location_t cml)
+  {
+    cache_memory_location = cml;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_cache_ratio(float ratio)
+  {
+    cache_ratio = ratio;
+    return *this;
+  }
+  wholegraph_embedding_cache_policy_t get_cache_policy(wholegraph_comm_t comm)
+  {
+    wholegraph_embedding_cache_policy_t cache_policy = nullptr;
+    if (!use_cache) return nullptr;
+    EXPECT_EQ(wholegraph_create_embedding_cache_policy(&cache_policy,
+                                                        comm,
+                                                        cache_memory_type,
+                                                        cache_memory_location,
+                                                        WHOLEGRAPH_AT_READWRITE,
+                                                        cache_ratio),
+              WHOLEGRAPH_SUCCESS);
+    return cache_policy;
+  }
+  int get_rank_partition_method() const { return rank_partition_method; }
+  EmbeddingBackwardTestParams& set_use_cache()
+  {
+    use_cache = true;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_run_count(int rc)
+  {
+    run_count = rc;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_optimizer_type(wholegraph_optimizer_type_t opt_type)
+  {
+    optimizer_type = opt_type;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_optimizer_params(const std::string& param_name, float value)
+  {
+    optimizer_params[param_name] = value;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& set_lr(const std::string& param_name, float lr)
+  {
+    lr_ = lr;
+    return *this;
+  }
+  EmbeddingBackwardTestParams& use_random_partition()
+  {
+    rank_partition_method = 1;
+    return *this;
+  }
+  wholegraph_array_description_t indice_description;
+  wholegraph_matrix_description_t embedding_description;
+  wholegraph_matrix_description_t grad_description;
+  wholegraph_memory_type_t memory_type               = WHOLEGRAPH_MT_CONTINUOUS;
+  wholegraph_memory_location_t memory_location       = WHOLEGRAPH_ML_HOST;
+  wholegraph_memory_type_t cache_memory_type         = WHOLEGRAPH_MT_CONTINUOUS;
+  wholegraph_memory_location_t cache_memory_location = WHOLEGRAPH_ML_DEVICE;
+  wholegraph_optimizer_type_t optimizer_type         = WHOLEGRAPH_OPT_SGD;
+  float cache_ratio                                   = 0.2;
+  bool use_cache                                      = false;
+  int run_count                                       = 3;
+
+  float lr_ = 0.1;
+
+  std::map<std::string, float> optimizer_params;
+  int rank_partition_method = 0;  // 0-default, 1-random
+};
+
+class WholeGraphEmbeddingBackwardParameterTests
+  : public ::testing::TestWithParam<EmbeddingBackwardTestParams> {};
+
+class CPUOptimizer {
+ public:
+  CPUOptimizer(EmbeddingBackwardTestParams* params, int64_t start_entry, int64_t end_entry)
+    : params_(params), start_entry_(start_entry), end_entry_(end_entry)
+  {
+    emb_dtype_ = params->embedding_description.dtype;
+    parse_params();
+    create_optimizer_states();
+  }
+  ~CPUOptimizer() = default;
+  void Apply(float lr,
+             const std::vector<int64_t>& indices,
+             const std::vector<std::vector<float>>& grads,
+             std::vector<std::vector<float>>& embs)
+  {
+    for (int64_t i = 0; i < indices.size(); i++) {
+      int64_t index       = indices[i];
+      int64_t local_index = index - start_entry_;
+      auto& grad_vec      = grads[i];
+      auto& emb_vec       = embs[index];
+      switch (params_->optimizer_type) {
+        case WHOLEGRAPH_OPT_LAZY_ADAM: {
+          ApplyLazyAdam(lr, local_index, grad_vec, emb_vec);
+          break;
+        }
+        case WHOLEGRAPH_OPT_SGD: {
+          ApplySGD(lr, local_index, grad_vec, emb_vec);
+          break;
+        }
+        case WHOLEGRAPH_OPT_ADAGRAD: {
+          ApplyAdaGrad(lr, local_index, grad_vec, emb_vec);
+          break;
+        }
+        case WHOLEGRAPH_OPT_RMSPROP: {
+          ApplyRMSProp(lr, local_index, grad_vec, emb_vec);
+          break;
+        }
+        default: {
+          FAIL();
+        }
+      }
+    }
+  }
+
+ private:
+  float emb_round_trip(float v) const
+  {
+    if (emb_dtype_ == WHOLEGRAPH_DT_HALF) return half_round_trip(v);
+    if (emb_dtype_ == WHOLEGRAPH_DT_BF16) return bf16_round_trip(v);
+    return v;
+  }
+  void ApplyLazyAdam(float lr,
+                     int64_t local_index,
+                     const std::vector<float>& grad_vec,
+                     std::vector<float>& emb_vec)
+  {
+    auto& m_vec  = optimizer_states_[0][local_index];
+    auto& v_vec  = optimizer_states_[1][local_index];
+    float beta1t = per_embedding_states_[0][local_index];
+    float beta2t = per_embedding_states_[1][local_index];
+    beta1t *= beta1_;
+    beta2t *= beta2_;
+    per_embedding_states_[0][local_index] = beta1t;
+    per_embedding_states_[1][local_index] = beta2t;
+    for (int i = 0; i < embedding_dim_; i++) {
+      float grad_value = grad_vec[i];
+      float emb_value  = emb_vec[i];
+      if (adam_w_) {
+        emb_value -= lr * weight_decay_ * emb_value;
+      } else {
+        grad_value += weight_decay_ * emb_value;
+      }
+      float m          = m_vec[i];
+      float v          = v_vec[i];
+      m                = beta1_ * m + (1 - beta1_) * grad_value;
+      v                = beta2_ * v + (1 - beta2_) * grad_value * grad_value;
+      float const mhat = m / (1 - beta1t);
+      float const vhat = v / (1 - beta2t);
+      emb_value        = emb_value - lr * mhat / (sqrtf(vhat) + epsilon_);
+      emb_vec[i]       = emb_round_trip(emb_value);
+      m_vec[i]         = m;
+      v_vec[i]         = v;
+    }
+  }
+  void ApplyAdaGrad(float lr,
+                    int64_t local_index,
+                    const std::vector<float>& grad_vec,
+                    std::vector<float>& emb_vec)
+  {
+    auto& state_sum_vec = optimizer_states_[0][local_index];
+    for (int i = 0; i < embedding_dim_; i++) {
+      float grad_value = grad_vec[i];
+      float emb_value  = emb_vec[i];
+      grad_value += weight_decay_ * emb_value;
+      float state_sum = state_sum_vec[i];
+      state_sum += grad_value * grad_value;
+      emb_value        = emb_value - lr * grad_value / (sqrtf(state_sum) + epsilon_);
+      emb_vec[i]       = emb_round_trip(emb_value);
+      state_sum_vec[i] = state_sum;
+    }
+  }
+  void ApplyRMSProp(float lr,
+                    int64_t local_index,
+                    const std::vector<float>& grad_vec,
+                    std::vector<float>& emb_vec)
+  {
+    auto& v_vec = optimizer_states_[0][local_index];
+    for (int i = 0; i < embedding_dim_; i++) {
+      float grad_value = grad_vec[i];
+      float emb_value  = emb_vec[i];
+      grad_value += weight_decay_ * emb_value;
+      auto v     = v_vec[i];
+      v          = alpha_ * v + (1 - alpha_) * grad_value * grad_value;
+      emb_value  = emb_value - lr * grad_value / (sqrtf(v) + epsilon_);
+      emb_vec[i] = emb_round_trip(emb_value);
+      v_vec[i]   = v;
+    }
+  }
+  void ApplySGD(float lr,
+                int64_t local_index,
+                const std::vector<float>& grad_vec,
+                std::vector<float>& emb_vec)
+  {
+    for (int i = 0; i < embedding_dim_; i++) {
+      float grad_value = grad_vec[i];
+      float emb_value  = emb_vec[i];
+      grad_value += weight_decay_ * emb_value;
+      emb_value -= lr * grad_value;
+      emb_vec[i] = emb_round_trip(emb_value);
+    }
+  }
+  void parse_params()
+  {
+    for (auto& optimizer_param : params_->optimizer_params) {
+      auto name         = optimizer_param.first;
+      float const value = optimizer_param.second;
+      if (name == "weight_decay") {
+        weight_decay_ = value;
+      } else if (name == "epsilon") {
+        epsilon_ = value;
+      } else if (name == "alpha") {
+        alpha_ = value;
+      } else if (name == "beta1") {
+        beta1_ = value;
+      } else if (name == "beta2") {
+        beta2_ = value;
+      } else if (name == "adam_w") {
+        adam_w_ = value > 0.5;
+      } else {
+        FAIL();
+      }
+    }
+  }
+  void create_optimizer_states()
+  {
+    switch (params_->optimizer_type) {
+      case WHOLEGRAPH_OPT_LAZY_ADAM: {
+        state_count_         = 2;
+        per_embedding_count_ = 2;
+        break;
+      }
+      case WHOLEGRAPH_OPT_SGD: {
+        state_count_         = 0;
+        per_embedding_count_ = 0;
+        break;
+      }
+      case WHOLEGRAPH_OPT_ADAGRAD: {
+        state_count_         = 1;
+        per_embedding_count_ = 1;
+        break;
+      }
+      case WHOLEGRAPH_OPT_RMSPROP: {
+        state_count_         = 1;
+        per_embedding_count_ = 1;
+        break;
+      }
+      default: {
+        FAIL();
+      }
+    }
+    embedding_dim_ = params_->grad_description.sizes[1];
+    optimizer_states_.resize(state_count_);
+    per_embedding_states_.resize(per_embedding_count_);
+    for (int i = 0; i < state_count_; i++) {
+      optimizer_states_[i].resize(end_entry_ - start_entry_);
+      for (int j = 0; j < end_entry_ - start_entry_; j++) {
+        optimizer_states_[i][j].resize(embedding_dim_, 0.0f);
+      }
+    }
+    for (int i = 0; i < per_embedding_count_; i++) {
+      per_embedding_states_[i].resize(end_entry_ - start_entry_, 1.0f);
+    }
+  }
+  EmbeddingBackwardTestParams* params_;
+  int64_t start_entry_;
+  int64_t end_entry_;
+  wholegraph_dtype_t emb_dtype_ = WHOLEGRAPH_DT_FLOAT;
+
+  float weight_decay_ = 0.0f;
+  float epsilon_      = 1e-8f;
+  float alpha_        = 0.99f;
+  float beta1_        = 0.9f;
+  float beta2_        = 0.999f;
+  bool adam_w_        = false;
+
+  int embedding_dim_       = 0;
+  int state_count_         = 0;
+  int per_embedding_count_ = 0;
+  std::vector<std::vector<std::vector<float>>> optimizer_states_;
+  std::vector<std::vector<float>> per_embedding_states_;
+};
+
+void prepare_data_and_reference(
+  EmbeddingBackwardTestParams& params,
+  int world_size,
+  std::vector<std::vector<std::vector<int64_t>>>& step_rank_indices,
+  std::vector<std::vector<std::vector<std::vector<float>>>>& step_rank_grads,
+  std::vector<std::vector<float>>& start_embedding_table,
+  std::vector<std::vector<float>>& end_embedding_table)
+{
+  step_rank_indices.resize(params.run_count);
+  step_rank_grads.resize(params.run_count);
+  for (int run = 0; run < params.run_count; run++) {
+    step_rank_indices[run].resize(world_size);
+    step_rank_grads[run].resize(world_size);
+  }
+  int cpu_count        = GetProcessorCount();
+  int thread_count     = std::max(1, cpu_count - 1);  // reserve one core for other usage
+  int run_thread_count = std::min(thread_count, params.run_count * world_size);
+  MultiThreadRun(run_thread_count,
+                 [&step_rank_indices, &step_rank_grads, &params, world_size](
+                   int thread_rank, int thread_world_size) {
+                   for (int idx = thread_rank; idx < params.run_count * world_size;
+                        idx += thread_world_size) {
+                     int run               = idx / world_size;
+                     int world_rank        = idx % world_size;
+                     auto& indice          = step_rank_indices[run][world_rank];
+                     auto& grads           = step_rank_grads[run][world_rank];
+                     int rank_indice_count = params.indice_description.size;
+                     indice.resize(rank_indice_count);
+                     grads.resize(rank_indice_count);
+                     wholegraph_array_description_t init_indice_desc = params.indice_description;
+                     init_indice_desc.dtype                           = WHOLEGRAPH_DT_INT64;
+                     int64_t entry_count = params.embedding_description.sizes[0];
+                     wholegraph_tensor_ops::testing::host_random_init_indices(
+                       indice.data(), init_indice_desc, entry_count);
+                     for (int i = 0; i < rank_indice_count; i++) {
+                       grads[i].resize(params.grad_description.sizes[1]);
+                       wholegraph_tensor_ops::testing::host_random_init_float(
+                         grads[i].data(), params.grad_description.sizes[1], -5.0, 10);
+                     }
+                   }
+                 });
+  start_embedding_table.resize(params.embedding_description.sizes[0]);
+  end_embedding_table.resize(params.embedding_description.sizes[0]);
+  auto emb_dtype = params.embedding_description.dtype;
+  MultiThreadRun(
+    thread_count,
+    [&params, &start_embedding_table, &end_embedding_table, emb_dtype](int thread_rank,
+                                                                       int thread_world_size) {
+      int64_t total_entry_count = start_embedding_table.size();
+      int64_t start_entry       = thread_rank * total_entry_count / thread_world_size;
+      int64_t end_entry         = (thread_rank + 1) * total_entry_count / thread_world_size;
+      int embedding_dim         = params.grad_description.sizes[1];
+      for (int64_t entry = start_entry; entry < end_entry; entry++) {
+        start_embedding_table[entry].resize(embedding_dim);
+        wholegraph_tensor_ops::testing::host_random_init_float(
+          start_embedding_table[entry].data(), embedding_dim, -10.0, 10);
+        if (emb_dtype == WHOLEGRAPH_DT_HALF) {
+          for (int d = 0; d < embedding_dim; d++)
+            start_embedding_table[entry][d] = half_round_trip(start_embedding_table[entry][d]);
+        } else if (emb_dtype == WHOLEGRAPH_DT_BF16) {
+          for (int d = 0; d < embedding_dim; d++)
+            start_embedding_table[entry][d] = bf16_round_trip(start_embedding_table[entry][d]);
+        }
+        end_embedding_table[entry] = start_embedding_table[entry];
+      }
+    });
+  MultiThreadRun(run_thread_count,
+                 [world_size, &params, &step_rank_indices, &step_rank_grads, &end_embedding_table](
+                   int thread_rank, int thread_world_size) {
+                   int64_t total_entry_count = end_embedding_table.size();
+                   int64_t start_entry       = thread_rank * total_entry_count / thread_world_size;
+                   int64_t end_entry = (thread_rank + 1) * total_entry_count / thread_world_size;
+                   CPUOptimizer cpu_optimizer(&params, start_entry, end_entry);
+                   int embedding_dim = params.grad_description.sizes[1];
+                   for (int step = 0; step < params.run_count; step++) {
+                     int step_id = std::min(step, params.run_count - 1);
+                     std::vector<int64_t> indices;
+                     std::vector<std::vector<float>> grads;
+                     std::unordered_map<int64_t, int> indice_map;
+                     for (int rank = 0; rank < world_size; rank++) {
+                       auto& indices_vec         = step_rank_indices[step_id][rank];
+                       auto& grad_vec            = step_rank_grads[step_id][rank];
+                       int64_t rank_indice_count = indices_vec.size();
+                       EXPECT_EQ(rank_indice_count, grad_vec.size());
+                       for (int i = 0; i < rank_indice_count; i++) {
+                         int64_t idx = indices_vec[i];
+                         if (idx < start_entry || idx >= end_entry) continue;
+                         auto& grad_data = grad_vec[i];
+                         auto it         = indice_map.find(idx);
+                         if (it == indice_map.end()) {
+                           indice_map[idx] = indices.size();
+                           indices.push_back(idx);
+                           grads.resize(grads.size() + 1);
+                           grads.back() = grad_data;
+                         } else {
+                           int64_t array_idx = it->second;
+                           for (int d = 0; d < embedding_dim; d++) {
+                             grads[array_idx][d] += grad_data[d];
+                           }
+                         }
+                       }
+                     }
+
+                     float lr = params.lr_;
+                     cpu_optimizer.Apply(lr, indices, grads, end_embedding_table);
+                   }
+                 });
+}
+
+template <typename IndiceT>
+void copy_indices(const int64_t* src_indice, IndiceT* dst_indice, int64_t indice_count)
+{
+  for (int64_t i = 0; i < indice_count; i++) {
+    dst_indice[i] = src_indice[i];
+  }
+}
+
+static void host_expect_all_close(const float* data_ptr,
+                                  const float* ref_ptr,
+                                  const float* old_ptr,
+                                  int64_t count,
+                                  int64_t entry,
+                                  float atol = 1e-5,
+                                  float rtol = 1e-5)
+{
+  int diff_count = 0;
+  for (int64_t i = 0; i < count && diff_count < 10; i++) {
+    float data = data_ptr[i];
+    float ref  = ref_ptr[i];
+    float aerr = abs(data - ref);
+    if (aerr < atol) continue;
+    float rerr = aerr / std::max(abs(data), abs(ref));
+    if (rerr < rtol) continue;
+    diff_count++;
+    EXPECT_LT(rerr, rtol) << "data[" << entry << "][" << i << "]=" << data << ", but ref is " << ref
+                          << ", old is " << old_ptr[i];
+  }
+}
+
+TEST_P(WholeGraphEmbeddingBackwardParameterTests, EmbeddingGatherGradientApplyTest)
+{
+  auto params = GetParam();
+  EXPECT_EQ(params.embedding_description.sizes[1], params.grad_description.sizes[1]);
+  int dev_count = ForkGetDeviceCount();
+  EXPECT_GE(dev_count, 1);
+  if (dev_count == 1 && params.is_large_test()) {
+    GTEST_SKIP() << "skipping large test on single gpu";
+  }
+  std::vector<std::array<int, 2>> pipes;
+  CreatePipes(&pipes, dev_count);
+
+  std::vector<std::vector<std::vector<int64_t>>> step_rank_indices;
+  std::vector<std::vector<std::vector<std::vector<float>>>> step_rank_grads;
+  std::vector<std::vector<float>> start_embedding_table;
+  std::vector<std::vector<float>> ref_end_embedding_table;
+
+  prepare_data_and_reference(params,
+                             dev_count,
+                             step_rank_indices,
+                             step_rank_grads,
+                             start_embedding_table,
+                             ref_end_embedding_table);
+
+  MultiProcessRun(
+    dev_count,
+    [&params,
+     &pipes,
+     &step_rank_indices,
+     &step_rank_grads,
+     &start_embedding_table,
+     &ref_end_embedding_table](int world_rank, int world_size) {
+      EXPECT_EQ(wholegraph_init(0), WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(cudaSetDevice(world_rank), cudaSuccess);
+      wholegraph_comm_t wg_comm    = create_communicator_by_pipes(pipes, world_rank, world_size);
+      wholegraph_comm_t cache_comm = wg_comm;
+
+      if (wholegraph_communicator_support_type_location(
+            wg_comm, params.memory_type, params.memory_location) != WHOLEGRAPH_SUCCESS ||
+          (params.use_cache &&
+           wholegraph_communicator_support_type_location(
+             cache_comm, params.cache_memory_type, params.cache_memory_location) !=
+             WHOLEGRAPH_SUCCESS)) {
+        EXPECT_EQ(wholegraph::destroy_all_communicators(), WHOLEGRAPH_SUCCESS);
+        EXPECT_EQ(wholegraph_finalize(), WHOLEGRAPH_SUCCESS);
+        WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
+        if (world_rank == 0) GTEST_SKIP_("Skip due to not supported.");
+        return;
+      }
+
+      int64_t embedding_dim = params.embedding_description.sizes[1];
+
+      void *dev_indices = nullptr, *dev_grad_buffer = nullptr;
+      void *host_indices = nullptr, *host_grad_buffer = nullptr;
+      size_t grad_buffer_size = wholegraph_get_memory_size_from_matrix(&params.grad_description);
+      size_t indices_buffer_size =
+        wholegraph_get_memory_size_from_array(&params.indice_description);
+
+      cudaStream_t stream;
+      EXPECT_EQ(cudaStreamCreate(&stream), cudaSuccess);
+
+      EXPECT_EQ(cudaMallocHost(&host_indices, indices_buffer_size), cudaSuccess);
+      EXPECT_EQ(cudaMalloc(&dev_indices, indices_buffer_size), cudaSuccess);
+      EXPECT_EQ(cudaMalloc(&dev_grad_buffer, grad_buffer_size), cudaSuccess);
+      EXPECT_EQ(cudaMallocHost(&host_grad_buffer, grad_buffer_size), cudaSuccess);
+
+      wholegraph_tensor_t indices_tensor, grad_tensor;
+      wholegraph_tensor_description_t indices_tensor_desc, grad_tensor_desc;
+      wholegraph_copy_array_desc_to_tensor(&indices_tensor_desc, &params.indice_description);
+      wholegraph_copy_matrix_desc_to_tensor(&grad_tensor_desc, &params.grad_description);
+      EXPECT_EQ(
+        wholegraph_make_tensor_from_pointer(&indices_tensor, dev_indices, &indices_tensor_desc),
+        WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(
+        wholegraph_make_tensor_from_pointer(&grad_tensor, dev_grad_buffer, &grad_tensor_desc),
+        WHOLEGRAPH_SUCCESS);
+
+      wholegraph_embedding_cache_policy_t cache_policy = params.get_cache_policy(cache_comm);
+
+      wholegraph_embedding_t wg_embedding;
+      wholegraph_tensor_description_t embedding_tensor_description;
+      wholegraph_copy_matrix_desc_to_tensor(&embedding_tensor_description,
+                                             &params.embedding_description);
+
+      wholegraph_embedding_optimizer_t optimizer;
+      EXPECT_EQ(wholegraph_create_embedding_optimizer(&optimizer, params.optimizer_type),
+                WHOLEGRAPH_SUCCESS);
+
+      for (auto& param_name_value : params.optimizer_params) {
+        EXPECT_EQ(wholegraph_optimizer_set_parameter(
+                    optimizer, param_name_value.first.c_str(), &param_name_value.second),
+                  WHOLEGRAPH_SUCCESS);
+      }
+      std::vector<size_t> rank_partition(world_size);
+      wholegraph_tensor_ops::testing::host_random_partition(
+        rank_partition.data(), embedding_tensor_description.sizes[0], world_size);
+      size_t* rank_partition_ptr = nullptr;
+      if (params.get_rank_partition_method() == 1) { rank_partition_ptr = rank_partition.data(); }
+      EXPECT_EQ(wholegraph_create_embedding(&wg_embedding,
+                                             &embedding_tensor_description,
+                                             wg_comm,
+                                             params.memory_type,
+                                             params.memory_location,
+                                             cache_policy,
+                                             rank_partition_ptr),
+                WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(wholegraph_embedding_set_optimizer(wg_embedding, optimizer), WHOLEGRAPH_SUCCESS);
+      wholegraph_tensor_t embedding_tensor =
+        wholegraph_embedding_get_embedding_tensor(wg_embedding);
+      wholegraph_tensor_t local_embed_tensor;
+      EXPECT_EQ(wholegraph_tensor_map_local_tensor(embedding_tensor, &local_embed_tensor),
+                WHOLEGRAPH_SUCCESS);
+      wholegraph_handle_t embedding_handle =
+        wholegraph_tensor_get_memory_handle(embedding_tensor);
+      size_t rank_entry_count = 0;
+      size_t rank_start_entry = 0;
+      EXPECT_EQ(wholegraph_tensor_get_local_entry_count(&rank_entry_count, embedding_tensor),
+                WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(wholegraph_tensor_get_local_entry_start(&rank_start_entry, embedding_tensor),
+                WHOLEGRAPH_SUCCESS);
+      rank_entry_count = std::min<int64_t>(
+        rank_entry_count, params.embedding_description.sizes[0] - rank_start_entry);
+      auto* dst_base_byte_ptr =
+        static_cast<char*>(wholegraph_tensor_get_data_pointer(local_embed_tensor));
+      auto* local_embed_desc     = wholegraph_tensor_get_tensor_description(local_embed_tensor);
+      size_t dst_stride          = local_embed_desc->strides[0];
+      auto emb_dtype             = local_embed_desc->dtype;
+      size_t emb_element_size    = wholegraph_dtype_get_element_size(emb_dtype);
+      size_t dst_stride_bytes    = dst_stride * emb_element_size;
+      size_t embedding_copy_elts = embedding_dim;
+
+      std::vector<char> host_row_buf(dst_stride * emb_element_size, 0);
+      for (int64_t i = 0; i < rank_entry_count; i++) {
+        const float* src = start_embedding_table[rank_start_entry + i].data();
+        if (emb_dtype == WHOLEGRAPH_DT_FLOAT) {
+          WG_CUDA_CHECK_NO_THROW(cudaMemcpy(dst_base_byte_ptr + i * dst_stride_bytes,
+                                            src,
+                                            embedding_copy_elts * sizeof(float),
+                                            cudaMemcpyHostToDevice));
+        } else if (emb_dtype == WHOLEGRAPH_DT_HALF) {
+          auto* dst_half = reinterpret_cast<__half*>(host_row_buf.data());
+          for (int64_t d = 0; d < embedding_copy_elts; d++)
+            dst_half[d] = static_cast<__half>(src[d]);
+          WG_CUDA_CHECK_NO_THROW(cudaMemcpy(dst_base_byte_ptr + i * dst_stride_bytes,
+                                            host_row_buf.data(),
+                                            embedding_copy_elts * sizeof(__half),
+                                            cudaMemcpyHostToDevice));
+        } else if (emb_dtype == WHOLEGRAPH_DT_BF16) {
+          auto* dst_bf16 = reinterpret_cast<__nv_bfloat16*>(host_row_buf.data());
+          for (int64_t d = 0; d < embedding_copy_elts; d++)
+            dst_bf16[d] = static_cast<__nv_bfloat16>(src[d]);
+          WG_CUDA_CHECK_NO_THROW(cudaMemcpy(dst_base_byte_ptr + i * dst_stride_bytes,
+                                            host_row_buf.data(),
+                                            embedding_copy_elts * sizeof(__nv_bfloat16),
+                                            cudaMemcpyHostToDevice));
+        }
+      }
+      EXPECT_EQ(cudaStreamSynchronize(nullptr), cudaSuccess);
+      EXPECT_EQ(wholegraph_communicator_barrier(wg_comm), WHOLEGRAPH_SUCCESS);
+
+      for (int run = 0; run < params.run_count; run++) {
+        int step_id            = std::min(run, params.run_count - 1);
+        auto& rank_indices_vec = step_rank_indices[step_id][world_rank];
+        auto& rank_grads_vec   = step_rank_grads[step_id][world_rank];
+        int64_t indice_count   = rank_indices_vec.size();
+        if (params.indice_description.dtype == WHOLEGRAPH_DT_INT64) {
+          copy_indices(rank_indices_vec.data(), static_cast<int64_t*>(host_indices), indice_count);
+        } else {
+          copy_indices(rank_indices_vec.data(), static_cast<int*>(host_indices), indice_count);
+        }
+        float* host_grad_float_ptr = static_cast<float*>(host_grad_buffer);
+        size_t grad_stride         = params.grad_description.stride;
+        size_t grad_vec_size       = params.grad_description.sizes[1];
+        for (int64_t i = 0; i < indice_count; i++) {
+          memcpy(&host_grad_float_ptr[i * grad_stride],
+                 rank_grads_vec[i].data(),
+                 grad_vec_size * sizeof(float));
+        }
+        auto indice_dtype = params.indice_description.dtype;
+
+        EXPECT_EQ(cudaMemcpy(dev_indices,
+                             host_indices,
+                             indice_count * wholegraph_dtype_get_element_size(indice_dtype),
+                             cudaMemcpyHostToDevice),
+                  cudaSuccess);
+        EXPECT_EQ(cudaMemcpy(dev_grad_buffer,
+                             host_grad_buffer,
+                             indice_count * grad_stride * sizeof(float),
+                             cudaMemcpyHostToDevice),
+                  cudaSuccess);
+        EXPECT_EQ(cudaStreamSynchronize(nullptr), cudaSuccess);
+        wholegraph_embedding_gather_gradient_apply(wg_embedding,
+                                                    indices_tensor,
+                                                    grad_tensor,
+                                                    true,
+                                                    params.lr_,
+                                                    wholegraph::get_default_env_func(),
+                                                    reinterpret_cast<int64_t>(stream));
+        EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        EXPECT_EQ(wholegraph_communicator_barrier(wg_comm), WHOLEGRAPH_SUCCESS);
+      }
+      EXPECT_EQ(
+        wholegraph_embedding_writeback_cache(wg_embedding, reinterpret_cast<int64_t>(stream)),
+        WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+      EXPECT_EQ(wholegraph_communicator_barrier(wg_comm), WHOLEGRAPH_SUCCESS);
+
+      std::vector<std::vector<float>> local_end_embedding(rank_entry_count);
+      std::vector<char> read_row_buf(dst_stride * emb_element_size, 0);
+      for (int64_t i = 0; i < rank_entry_count; i++) {
+        local_end_embedding[i].resize(embedding_dim);
+        if (emb_dtype == WHOLEGRAPH_DT_FLOAT) {
+          EXPECT_EQ(cudaMemcpy(local_end_embedding[i].data(),
+                               dst_base_byte_ptr + i * dst_stride_bytes,
+                               embedding_copy_elts * sizeof(float),
+                               cudaMemcpyDeviceToHost),
+                    cudaSuccess);
+        } else if (emb_dtype == WHOLEGRAPH_DT_HALF) {
+          EXPECT_EQ(cudaMemcpy(read_row_buf.data(),
+                               dst_base_byte_ptr + i * dst_stride_bytes,
+                               embedding_copy_elts * sizeof(__half),
+                               cudaMemcpyDeviceToHost),
+                    cudaSuccess);
+          auto* src_half = reinterpret_cast<__half*>(read_row_buf.data());
+          for (int64_t d = 0; d < embedding_dim; d++)
+            local_end_embedding[i][d] = static_cast<float>(src_half[d]);
+        } else if (emb_dtype == WHOLEGRAPH_DT_BF16) {
+          EXPECT_EQ(cudaMemcpy(read_row_buf.data(),
+                               dst_base_byte_ptr + i * dst_stride_bytes,
+                               embedding_copy_elts * sizeof(__nv_bfloat16),
+                               cudaMemcpyDeviceToHost),
+                    cudaSuccess);
+          auto* src_bf16 = reinterpret_cast<__nv_bfloat16*>(read_row_buf.data());
+          for (int64_t d = 0; d < embedding_dim; d++)
+            local_end_embedding[i][d] = static_cast<float>(src_bf16[d]);
+        }
+      }
+      EXPECT_EQ(cudaStreamSynchronize(nullptr), cudaSuccess);
+      float atol = 1e-5f, rtol = 1e-5f;
+      if (emb_dtype == WHOLEGRAPH_DT_HALF) {
+        atol = 5e-3f;
+        rtol = 5e-3f;
+      }
+      if (emb_dtype == WHOLEGRAPH_DT_BF16) {
+        atol = 2e-2f;
+        rtol = 2e-2f;
+      }
+      for (int64_t i = 0; i < rank_entry_count; i++) {
+        if (::testing::Test::HasFailure()) break;
+        host_expect_all_close(local_end_embedding[i].data(),
+                              ref_end_embedding_table[i + rank_start_entry].data(),
+                              start_embedding_table[i + rank_start_entry].data(),
+                              embedding_dim,
+                              i,
+                              atol,
+                              rtol);
+      }
+
+      EXPECT_EQ(wholegraph_destroy_embedding_cache_policy(cache_policy), WHOLEGRAPH_SUCCESS);
+
+      EXPECT_EQ(wholegraph_destroy_tensor(indices_tensor), WHOLEGRAPH_SUCCESS);
+      EXPECT_EQ(wholegraph_destroy_tensor(grad_tensor), WHOLEGRAPH_SUCCESS);
+
+      EXPECT_EQ(cudaFreeHost(host_indices), cudaSuccess);
+      EXPECT_EQ(cudaFree(dev_indices), cudaSuccess);
+      EXPECT_EQ(cudaFree(dev_grad_buffer), cudaSuccess);
+      EXPECT_EQ(cudaFreeHost(host_grad_buffer), cudaSuccess);
+
+      EXPECT_EQ(wholegraph_destroy_embedding(wg_embedding), WHOLEGRAPH_SUCCESS);
+      wholegraph_destroy_embedding_optimizer(optimizer);
+
+      EXPECT_EQ(wholegraph_finalize(), WHOLEGRAPH_SUCCESS);
+      WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
+    },
+    true);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  CachedEmbeddingGatherBackwardTest,
+  WholeGraphEmbeddingBackwardParameterTests,
+  ::testing::Values(
+#if 0
+        EmbeddingBackwardTestParams(),
+        EmbeddingBackwardTestParams().set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+        EmbeddingBackwardTestParams().set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+        EmbeddingBackwardTestParams().set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+        EmbeddingBackwardTestParams().set_use_cache(),
+        EmbeddingBackwardTestParams().set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+        EmbeddingBackwardTestParams().set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+        EmbeddingBackwardTestParams().set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+        EmbeddingBackwardTestParams().set_run_count(10),
+        EmbeddingBackwardTestParams().set_run_count(10).set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+        EmbeddingBackwardTestParams().set_run_count(10).set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+        EmbeddingBackwardTestParams().set_run_count(10).set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+        EmbeddingBackwardTestParams().set_run_count(10).set_use_cache(),
+        EmbeddingBackwardTestParams().set_run_count(10).set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+        EmbeddingBackwardTestParams().set_run_count(10).set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+        EmbeddingBackwardTestParams().set_run_count(10).set_use_cache().set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+
+        EmbeddingBackwardTestParams().set_use_cache().set_indice_count(10000127),
+        EmbeddingBackwardTestParams().set_use_cache().set_indice_count(10000127).set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+        EmbeddingBackwardTestParams().set_use_cache().set_indice_count(10000127).set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+        EmbeddingBackwardTestParams().set_use_cache().set_indice_count(10000127).set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+#endif
+    EmbeddingBackwardTestParams().set_entry_count(500).set_indice_count(400).set_embedding_dim(4),
+    EmbeddingBackwardTestParams().set_embedding_dim(3),
+    EmbeddingBackwardTestParams()
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams()
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams()
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams()
+      .set_memory_type(WHOLEGRAPH_MT_DISTRIBUTED)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams()
+      .set_memory_type(WHOLEGRAPH_MT_DISTRIBUTED)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams()
+      .set_memory_type(WHOLEGRAPH_MT_DISTRIBUTED)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM)
+      .use_random_partition(),
+    EmbeddingBackwardTestParams().set_use_cache().set_grad_stride(131),
+    EmbeddingBackwardTestParams().set_use_cache().set_grad_stride(131).set_optimizer_type(
+      WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams().set_use_cache().set_grad_stride(131).set_optimizer_type(
+      WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams().set_use_cache().set_grad_stride(131).set_optimizer_type(
+      WHOLEGRAPH_OPT_LAZY_ADAM),
+
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_memory_type(WHOLEGRAPH_MT_CONTINUOUS)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_memory_type(WHOLEGRAPH_MT_DISTRIBUTED)
+      .set_cache_memory_type(WHOLEGRAPH_MT_DISTRIBUTED)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+
+    EmbeddingBackwardTestParams().set_use_cache().set_cache_ratio(0.07).set_optimizer_type(
+      WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams().set_use_cache().set_cache_ratio(0.53).set_optimizer_type(
+      WHOLEGRAPH_OPT_LAZY_ADAM),
+
+    EmbeddingBackwardTestParams(),
+    EmbeddingBackwardTestParams().set_indice_dtype(WHOLEGRAPH_DT_INT),
+    EmbeddingBackwardTestParams()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams().set_use_cache().set_indice_dtype(WHOLEGRAPH_DT_INT),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_indice_dtype(WHOLEGRAPH_DT_INT)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(129),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(129).set_optimizer_type(
+      WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(129).set_optimizer_type(
+      WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(129).set_optimizer_type(
+      WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_embedding_dim(129)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM)
+      .set_run_count(10)
+      .set_optimizer_params("beta1", 0.8),
+    EmbeddingBackwardTestParams()
+      .set_use_cache()
+      .set_embedding_dim(129)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM)
+      .set_run_count(10)
+      .set_optimizer_params("beta2", 0.9),
+
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(392),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(392).set_optimizer_type(
+      WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(392).set_optimizer_type(
+      WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams().set_use_cache().set_embedding_dim(392).set_optimizer_type(
+      WHOLEGRAPH_OPT_LAZY_ADAM),
+
+    EmbeddingBackwardTestParams(),
+
+    // FP16 embedding tests (mixed precision: FP16 storage, FP32 optimizer states)
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(64),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(64)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(127),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_HALF)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(127)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+
+    // BF16 embedding tests (mixed precision: BF16 storage, FP32 optimizer states)
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_BF16)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_BF16)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_RMSPROP),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_BF16)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_ADAGRAD),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_BF16)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(32)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM),
+    EmbeddingBackwardTestParams()
+      .set_embedding_dtype(WHOLEGRAPH_DT_BF16)
+      .set_memory_location(WHOLEGRAPH_ML_DEVICE)
+      .set_entry_count(500)
+      .set_indice_count(400)
+      .set_embedding_dim(64)
+      .set_optimizer_type(WHOLEGRAPH_OPT_LAZY_ADAM)));

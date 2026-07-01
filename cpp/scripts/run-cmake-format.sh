@@ -28,25 +28,26 @@
 # bash run-cmake-format.sh {cmake-format,cmake-lint} infile [infile ...]
 
 status=0
-if [ -z ${CUGRAPH_GNN_ROOT:+PLACEHOLDER} ]; then
-    CUGRAPH_GNN_BUILD_DIR=$(git rev-parse --show-toplevel 2>&1)/cpp/build
+if [ -z ${CUGRAPH_ROOT:+PLACEHOLDER} ]; then
+    CUGRAPH_ROOT=$(git rev-parse --show-toplevel 2>&1)
     status=$?
 else
-    CUGRAPH_GNN_BUILD_DIR=${CUGRAPH_GNN_ROOT}
+    status=0
 fi
+WHOLEGRAPH_BUILD_DIR=${CUGRAPH_ROOT}/cpp/build
 
 if ! [ ${status} -eq 0 ]; then
-    if [[ ${CUGRAPH_GNN_BUILD_DIR} == *"not a git repository"* ]]; then
-        echo "This script must be run inside the cugraph-gnn repository, or the CUGRAPH_GNN_ROOT environment variable must be set."
+    if [[ ${CUGRAPH_ROOT} == *"not a git repository"* ]]; then
+        echo "This script must be run inside the cugraph repository, or the CUGRAPH_ROOT environment variable must be set."
     else
         echo "Script failed with unknown error attempting to determine project root:"
-        echo ${CUGRAPH_GNN_BUILD_DIR}
+        echo ${CUGRAPH_ROOT}
     fi
     exit 1
 fi
 
 DEFAULT_FORMAT_FILE_LOCATIONS=(
-  "${CUGRAPH_GNN_BUILD_DIR:-${HOME}}/_deps/rapids-cmake-src/cmake-format-rapids-cmake.json"
+  "${WHOLEGRAPH_BUILD_DIR:-${HOME}}/_deps/rapids-cmake-src/cmake-format-rapids-cmake.json"
 )
 
 if [ -z ${RAPIDS_CMAKE_FORMAT_FILE:+PLACEHOLDER} ]; then

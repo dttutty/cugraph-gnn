@@ -13,9 +13,9 @@
 #include <raft/core/error.hpp>
 
 #include "error.hpp"
-#include <wholememory/wholememory.h>
+#include <wholegraph/wholegraph.h>
 
-namespace wholememory {
+namespace wholegraph {
 
 LogLevel& get_log_level();
 
@@ -50,29 +50,29 @@ inline std::string format(const char* fmt, ...)
 {
   va_list vl;
   va_start(vl, fmt);
-  std::string str = wholememory::format(fmt, vl);
+  std::string str = wholegraph::format(fmt, vl);
   va_end(vl);
   return str;
 }
 /** @} */
 
-#define WHOLEMEMORY_LOG(lev, fmt, ...)                                                 \
+#define WHOLEGRAPH_LOG(lev, fmt, ...)                                                 \
   do {                                                                                 \
-    if (wholememory::will_log_for(lev))                                                \
-      std::cout << wholememory::format(fmt, ##__VA_ARGS__) << std::endl << std::flush; \
+    if (wholegraph::will_log_for(lev))                                                \
+      std::cout << wholegraph::format(fmt, ##__VA_ARGS__) << std::endl << std::flush; \
   } while (0)
 
-#define WHOLEMEMORY_FATAL(fmt, ...)                                                    \
+#define WHOLEGRAPH_FATAL(fmt, ...)                                                    \
   do {                                                                                 \
     std::string fatal_msg{};                                                           \
-    SET_WHOLEMEMORY_ERROR_MSG(fatal_msg, "WholeMemory FATAL at ", fmt, ##__VA_ARGS__); \
-    throw wholememory::logic_error(fatal_msg);                                         \
+    SET_WHOLEGRAPH_ERROR_MSG(fatal_msg, "WholeGraph FATAL at ", fmt, ##__VA_ARGS__); \
+    throw wholegraph::logic_error(fatal_msg);                                         \
   } while (0)
 
-#define WHOLEMEMORY_ERROR(fmt, ...) WHOLEMEMORY_LOG(LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define WHOLEMEMORY_WARN(fmt, ...)  WHOLEMEMORY_LOG(LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define WHOLEMEMORY_INFO(fmt, ...)  WHOLEMEMORY_LOG(LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define WHOLEMEMORY_DEBUG(fmt, ...) WHOLEMEMORY_LOG(LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define WHOLEMEMORY_TRACE(fmt, ...) WHOLEMEMORY_LOG(LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define WHOLEGRAPH_ERROR(fmt, ...) WHOLEGRAPH_LOG(LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define WHOLEGRAPH_WARN(fmt, ...)  WHOLEGRAPH_LOG(LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define WHOLEGRAPH_INFO(fmt, ...)  WHOLEGRAPH_LOG(LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define WHOLEGRAPH_DEBUG(fmt, ...) WHOLEGRAPH_LOG(LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define WHOLEGRAPH_TRACE(fmt, ...) WHOLEGRAPH_LOG(LEVEL_TRACE, fmt, ##__VA_ARGS__)
 
-}  // namespace wholememory
+}  // namespace wholegraph

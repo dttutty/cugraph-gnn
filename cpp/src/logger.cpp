@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-namespace wholememory {
+namespace wholegraph {
 
 LogLevel& get_log_level()
 {
@@ -20,4 +20,4 @@ void set_log_level(LogLevel lev) { get_log_level() = lev; }
 
 bool will_log_for(LogLevel lev) { return lev <= get_log_level(); }
 
-}  // namespace wholememory
+}  // namespace wholegraph

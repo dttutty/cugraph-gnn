@@ -8,6 +8,7 @@
 cmake_minimum_required(VERSION 4.0 FATAL_ERROR)
 
 include(../../cmake/rapids_config.cmake)
+include(../../cmake/python_package_prefixes.cmake)
 include(rapids-cmake)
 include(rapids-cuda)
 include(rapids-cpm)
@@ -20,12 +21,11 @@ project(
   LANGUAGES CXX CUDA
 )
 
+cugraph_append_python_package_cmake_prefixes()
+
 find_package(wholegraph "${RAPIDS_VERSION}" REQUIRED)
 
-include(rapids-cython-core)
-rapids_cython_init()
-
 # ##################################################################################################
-# * Cython modules -----------------------------------------------------------
+# * Binding modules ----------------------------------------------------------
 
-add_subdirectory(pylibwholegraph/binding)
+add_subdirectory(src/pylibwholegraph/binding)

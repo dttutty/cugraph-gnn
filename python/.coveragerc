@@ -1,9 +1,0 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION.
-# SPDX-License-Identifier: Apache-2.0
-
-# Configuration file for Python coverage tests
-[run]
-include = cugraph-pyg/cugraph_pyg/*
-          pylibwholegraph/pylibwholegraph/*
-omit = cugraph-pyg/cugraph_pyg/tests/*
-       pylibwholegraph/pylibwholegraph/tests/*

@@ -4,9 +4,9 @@
  */
 #include <gtest/gtest.h>
 
-#include "wholememory/env_func_ptrs.hpp"
-#include <wholememory/graph_op.h>
-#include <wholememory/tensor_description.h>
+#include "wholegraph/env_func_ptrs.hpp"
+#include <wholegraph/graph_op.h>
+#include <wholegraph/tensor_description.h>
 
 #include "../wholegraph_ops/graph_sampling_test_utils.hpp"
 #include "csr_add_self_loop_utils.hpp"
@@ -29,13 +29,13 @@ typedef struct CsrAddSelfLoopTestParam {
     return *this;
   }
 
-  wholememory_array_description_t get_csr_row_ptr_array_desc() const
+  wholegraph_array_description_t get_csr_row_ptr_array_desc() const
   {
-    return wholememory_create_array_desc(graph_row_num + 1, 0, WHOLEMEMORY_DT_INT);
+    return wholegraph_create_array_desc(graph_row_num + 1, 0, WHOLEGRAPH_DT_INT);
   }
-  wholememory_array_description_t get_csr_col_ptr_array_desc() const
+  wholegraph_array_description_t get_csr_col_ptr_array_desc() const
   {
-    return wholememory_create_array_desc(graph_edge_num, 0, WHOLEMEMORY_DT_INT);
+    return wholegraph_create_array_desc(graph_edge_num, 0, WHOLEGRAPH_DT_INT);
   }
   int get_graph_row_num() const { return graph_row_num; }
   int get_graph_col_num() const { return graph_col_num; }
@@ -65,9 +65,9 @@ TEST_P(GraphCsrAddSelfLoopParameterTests, CsrAddSelfLoopParameterTest)
   auto csr_row_ptr_array_desc = params.get_csr_row_ptr_array_desc();
   auto csr_col_ptr_array_desc = params.get_csr_col_ptr_array_desc();
   void* host_csr_row_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc));
   void* host_csr_col_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&csr_col_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&csr_col_ptr_array_desc));
   graph_ops::testing::gen_local_csr_graph(graph_row_num,
                                           graph_col_num,
                                           graph_edge_num,
@@ -78,81 +78,81 @@ TEST_P(GraphCsrAddSelfLoopParameterTests, CsrAddSelfLoopParameterTest)
 
   int output_edge_num = graph_edge_num + graph_row_num;
   auto output_csr_col_ptr_array_desc =
-    wholememory_create_array_desc(output_edge_num, 0, WHOLEMEMORY_DT_INT);
+    wholegraph_create_array_desc(output_edge_num, 0, WHOLEGRAPH_DT_INT);
   void* host_output_csr_row_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc));
   void* host_output_csr_col_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&output_csr_col_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&output_csr_col_ptr_array_desc));
 
   void* host_ref_output_csr_row_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc));
   void* host_ref_output_csr_col_ptr =
-    (void*)malloc(wholememory_get_memory_size_from_array(&output_csr_col_ptr_array_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&output_csr_col_ptr_array_desc));
 
   void *dev_csr_row_ptr, *dev_csr_col_ptr, *dev_output_csr_row_ptr, *dev_output_csr_col_ptr;
   EXPECT_EQ(
-    cudaMalloc(&dev_csr_row_ptr, wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc)),
+    cudaMalloc(&dev_csr_row_ptr, wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc)),
     cudaSuccess);
   EXPECT_EQ(
-    cudaMalloc(&dev_csr_col_ptr, wholememory_get_memory_size_from_array(&csr_col_ptr_array_desc)),
+    cudaMalloc(&dev_csr_col_ptr, wholegraph_get_memory_size_from_array(&csr_col_ptr_array_desc)),
     cudaSuccess);
   EXPECT_EQ(cudaMalloc(&dev_output_csr_row_ptr,
-                       wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc)),
+                       wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc)),
             cudaSuccess);
   EXPECT_EQ(cudaMalloc(&dev_output_csr_col_ptr,
-                       wholememory_get_memory_size_from_array(&output_csr_col_ptr_array_desc)),
+                       wholegraph_get_memory_size_from_array(&output_csr_col_ptr_array_desc)),
             cudaSuccess);
   EXPECT_EQ(cudaMemcpy(dev_csr_row_ptr,
                        host_csr_row_ptr,
-                       wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc),
+                       wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc),
                        cudaMemcpyHostToDevice),
             cudaSuccess);
   EXPECT_EQ(cudaMemcpy(dev_csr_col_ptr,
                        host_csr_col_ptr,
-                       wholememory_get_memory_size_from_array(&csr_col_ptr_array_desc),
+                       wholegraph_get_memory_size_from_array(&csr_col_ptr_array_desc),
                        cudaMemcpyHostToDevice),
             cudaSuccess);
 
-  wholememory_tensor_description_t csr_row_ptr_tensor_desc, csr_col_ptr_tensor_desc,
+  wholegraph_tensor_description_t csr_row_ptr_tensor_desc, csr_col_ptr_tensor_desc,
     output_csr_row_ptr_tensor_desc, output_csr_col_ptr_tensor_desc;
-  wholememory_tensor_t csr_row_ptr_tensor, csr_col_ptr_tensor, output_csr_row_ptr_tensor,
+  wholegraph_tensor_t csr_row_ptr_tensor, csr_col_ptr_tensor, output_csr_row_ptr_tensor,
     output_csr_col_ptr_tensor;
-  wholememory_copy_array_desc_to_tensor(&csr_row_ptr_tensor_desc, &csr_row_ptr_array_desc);
-  wholememory_copy_array_desc_to_tensor(&csr_col_ptr_tensor_desc, &csr_col_ptr_array_desc);
-  wholememory_copy_array_desc_to_tensor(&output_csr_row_ptr_tensor_desc, &csr_row_ptr_array_desc);
-  wholememory_copy_array_desc_to_tensor(&output_csr_col_ptr_tensor_desc,
+  wholegraph_copy_array_desc_to_tensor(&csr_row_ptr_tensor_desc, &csr_row_ptr_array_desc);
+  wholegraph_copy_array_desc_to_tensor(&csr_col_ptr_tensor_desc, &csr_col_ptr_array_desc);
+  wholegraph_copy_array_desc_to_tensor(&output_csr_row_ptr_tensor_desc, &csr_row_ptr_array_desc);
+  wholegraph_copy_array_desc_to_tensor(&output_csr_col_ptr_tensor_desc,
                                         &output_csr_col_ptr_array_desc);
 
-  EXPECT_EQ(wholememory_make_tensor_from_pointer(
+  EXPECT_EQ(wholegraph_make_tensor_from_pointer(
               &csr_row_ptr_tensor, dev_csr_row_ptr, &csr_row_ptr_tensor_desc),
-            WHOLEMEMORY_SUCCESS);
-  EXPECT_EQ(wholememory_make_tensor_from_pointer(
+            WHOLEGRAPH_SUCCESS);
+  EXPECT_EQ(wholegraph_make_tensor_from_pointer(
               &csr_col_ptr_tensor, dev_csr_col_ptr, &csr_col_ptr_tensor_desc),
-            WHOLEMEMORY_SUCCESS);
+            WHOLEGRAPH_SUCCESS);
 
-  EXPECT_EQ(wholememory_make_tensor_from_pointer(
+  EXPECT_EQ(wholegraph_make_tensor_from_pointer(
               &output_csr_row_ptr_tensor, dev_output_csr_row_ptr, &output_csr_row_ptr_tensor_desc),
-            WHOLEMEMORY_SUCCESS);
-  EXPECT_EQ(wholememory_make_tensor_from_pointer(
+            WHOLEGRAPH_SUCCESS);
+  EXPECT_EQ(wholegraph_make_tensor_from_pointer(
               &output_csr_col_ptr_tensor, dev_output_csr_col_ptr, &output_csr_col_ptr_tensor_desc),
-            WHOLEMEMORY_SUCCESS);
+            WHOLEGRAPH_SUCCESS);
 
   EXPECT_EQ(csr_add_self_loop(csr_row_ptr_tensor,
                               csr_col_ptr_tensor,
                               output_csr_row_ptr_tensor,
                               output_csr_col_ptr_tensor,
                               stream),
-            WHOLEMEMORY_SUCCESS);
+            WHOLEGRAPH_SUCCESS);
   EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
   EXPECT_EQ(cudaMemcpy(host_output_csr_row_ptr,
                        dev_output_csr_row_ptr,
-                       wholememory_get_memory_size_from_array(&csr_row_ptr_array_desc),
+                       wholegraph_get_memory_size_from_array(&csr_row_ptr_array_desc),
                        cudaMemcpyDeviceToHost),
             cudaSuccess);
 
   EXPECT_EQ(cudaMemcpy(host_output_csr_col_ptr,
                        dev_output_csr_col_ptr,
-                       wholememory_get_memory_size_from_array(&output_csr_col_ptr_array_desc),
+                       wholegraph_get_memory_size_from_array(&output_csr_col_ptr_array_desc),
                        cudaMemcpyDeviceToHost),
             cudaSuccess);
   EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
@@ -185,7 +185,7 @@ TEST_P(GraphCsrAddSelfLoopParameterTests, CsrAddSelfLoopParameterTest)
   if (host_ref_output_csr_col_ptr != nullptr) free(host_ref_output_csr_col_ptr);
 
   EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
-  WHOLEMEMORY_CHECK(::testing::Test::HasFailure() == false);
+  WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
 }
 
 INSTANTIATE_TEST_SUITE_P(CsrAddSelfLoopOpTests,

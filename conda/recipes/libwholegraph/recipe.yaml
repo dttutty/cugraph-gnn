@@ -28,7 +28,7 @@ cache:
         export CXXFLAGS=$(echo $CXXFLAGS | sed -E 's@\-fdebug\-prefix\-map[^ ]*@@g')
         set +x
 
-        ./build.sh -n libwholegraph tests -v --allgpuarch
+        ./build.sh -n libwholegraph wholegraph-tests -v --allgpuarch
       secrets:
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
@@ -71,7 +71,6 @@ cache:
       - ${{ stdlib("c") }}
     host:
       - cuda-version =${{ cuda_version }}
-      - doxygen ${{ doxygen_version }}
       - libraft =${{ minor_version }}
       - libraft-headers =${{ minor_version }}
       - librmm =${{ minor_version }}

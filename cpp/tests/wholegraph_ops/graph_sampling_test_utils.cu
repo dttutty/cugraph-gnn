@@ -14,7 +14,7 @@
 
 #include <raft/random/rng_device.cuh>
 #include <raft/random/rng_state.hpp>
-#include <wholememory_ops/register.hpp>
+#include <wholegraph_tensor_ops/register.hpp>
 
 namespace wholegraph_ops {
 namespace testing {
@@ -23,9 +23,9 @@ template <typename DataType>
 void host_get_csr_graph(int64_t graph_node_count,
                         int64_t graph_edge_count,
                         void* host_csr_row_ptr,
-                        wholememory_array_description_t graph_csr_row_ptr_desc,
+                        wholegraph_array_description_t graph_csr_row_ptr_desc,
                         void* host_csr_col_ptr,
-                        wholememory_array_description_t graph_csr_col_ptr_desc)
+                        wholegraph_array_description_t graph_csr_col_ptr_desc)
 {
   int64_t* csr_row_ptr          = static_cast<int64_t*>(host_csr_row_ptr);
   DataType* csr_col_ptr         = static_cast<DataType*>(host_csr_col_ptr);
@@ -98,7 +98,7 @@ void host_get_csr_graph(int64_t graph_node_count,
 
 template <typename DataType>
 void host_get_csr_weight_graph(void* host_csr_weight_ptr,
-                               wholememory_array_description_t graph_csr_weight_ptr_desc)
+                               wholegraph_array_description_t graph_csr_weight_ptr_desc)
 {
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -111,15 +111,15 @@ void host_get_csr_weight_graph(void* host_csr_weight_ptr,
 void gen_csr_graph(int64_t graph_node_count,
                    int64_t graph_edge_count,
                    void* host_csr_row_ptr,
-                   wholememory_array_description_t graph_csr_row_ptr_desc,
+                   wholegraph_array_description_t graph_csr_row_ptr_desc,
                    void* host_csr_col_ptr,
-                   wholememory_array_description_t graph_csr_col_ptr_desc,
+                   wholegraph_array_description_t graph_csr_col_ptr_desc,
                    void* host_csr_weight_ptr,
-                   wholememory_array_description_t graph_csr_weight_ptr_desc)
+                   wholegraph_array_description_t graph_csr_weight_ptr_desc)
 {
-  EXPECT_TRUE(graph_csr_row_ptr_desc.dtype == WHOLEMEMORY_DT_INT64);
+  EXPECT_TRUE(graph_csr_row_ptr_desc.dtype == WHOLEGRAPH_DT_INT64);
 
-  if (graph_csr_col_ptr_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  if (graph_csr_col_ptr_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_csr_graph<int64_t>(graph_node_count,
                                 graph_edge_count,
                                 host_csr_row_ptr,
@@ -127,7 +127,7 @@ void gen_csr_graph(int64_t graph_node_count,
                                 host_csr_col_ptr,
                                 graph_csr_col_ptr_desc);
 
-  } else if (graph_csr_col_ptr_desc.dtype == WHOLEMEMORY_DT_INT) {
+  } else if (graph_csr_col_ptr_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_csr_graph<int>(graph_node_count,
                             graph_edge_count,
                             host_csr_row_ptr,
@@ -136,9 +136,9 @@ void gen_csr_graph(int64_t graph_node_count,
                             graph_csr_col_ptr_desc);
   }
   if (host_csr_weight_ptr != nullptr) {
-    if (graph_csr_weight_ptr_desc.dtype == WHOLEMEMORY_DT_FLOAT) {
+    if (graph_csr_weight_ptr_desc.dtype == WHOLEGRAPH_DT_FLOAT) {
       host_get_csr_weight_graph<float>(host_csr_weight_ptr, graph_csr_weight_ptr_desc);
-    } else if (graph_csr_weight_ptr_desc.dtype == WHOLEMEMORY_DT_DOUBLE) {
+    } else if (graph_csr_weight_ptr_desc.dtype == WHOLEGRAPH_DT_DOUBLE) {
       host_get_csr_weight_graph<double>(host_csr_weight_ptr, graph_csr_weight_ptr_desc);
     }
   }
@@ -146,7 +146,7 @@ void gen_csr_graph(int64_t graph_node_count,
 
 template <typename DataType>
 void host_get_random_array(void* array,
-                           wholememory_array_description_t array_desc,
+                           wholegraph_array_description_t array_desc,
                            int64_t low,
                            int64_t high)
 {
@@ -159,12 +159,12 @@ void host_get_random_array(void* array,
 }
 
 void host_random_init_array(void* array,
-                            wholememory_array_description_t array_desc,
+                            wholegraph_array_description_t array_desc,
                             int64_t low,
                             int64_t high)
 {
-  EXPECT_TRUE(array_desc.dtype == WHOLEMEMORY_DT_INT || array_desc.dtype == WHOLEMEMORY_DT_INT64);
-  if (array_desc.dtype == WHOLEMEMORY_DT_INT) {
+  EXPECT_TRUE(array_desc.dtype == WHOLEGRAPH_DT_INT || array_desc.dtype == WHOLEGRAPH_DT_INT64);
+  if (array_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_random_array<int>(array, array_desc, low, high);
   } else {
     host_get_random_array<int64_t>(array, array_desc, low, high);
@@ -172,7 +172,7 @@ void host_random_init_array(void* array,
 }
 
 template <typename DataType>
-void host_get_prefix_sum_array(void* array, wholememory_array_description_t array_desc)
+void host_get_prefix_sum_array(void* array, wholegraph_array_description_t array_desc)
 {
   DataType* array_ptr = static_cast<DataType*>(array);
   if (array_desc.size <= 0) return;
@@ -185,31 +185,31 @@ void host_get_prefix_sum_array(void* array, wholememory_array_description_t arra
   }
 }
 
-void host_prefix_sum_array(void* array, wholememory_array_description_t array_desc)
+void host_prefix_sum_array(void* array, wholegraph_array_description_t array_desc)
 {
-  EXPECT_TRUE(array_desc.dtype == WHOLEMEMORY_DT_INT || array_desc.dtype == WHOLEMEMORY_DT_INT64);
-  if (array_desc.dtype == WHOLEMEMORY_DT_INT) {
+  EXPECT_TRUE(array_desc.dtype == WHOLEGRAPH_DT_INT || array_desc.dtype == WHOLEGRAPH_DT_INT64);
+  if (array_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_prefix_sum_array<int>(array, array_desc);
   } else {
     host_get_prefix_sum_array<int64_t>(array, array_desc);
   }
 }
 
-void copy_host_array_to_wholememory(void* host_array,
-                                    wholememory_handle_t array_handle,
-                                    wholememory_array_description_t array_desc,
+void copy_host_array_to_wholegraph(void* host_array,
+                                    wholegraph_handle_t array_handle,
+                                    wholegraph_array_description_t array_desc,
                                     cudaStream_t stream)
 {
   void* local_array_ptr;
   size_t local_array_size, local_array_offset;
-  EXPECT_EQ(wholememory_get_local_memory(
+  EXPECT_EQ(wholegraph_get_local_memory(
               &local_array_ptr, &local_array_size, &local_array_offset, array_handle),
-            WHOLEMEMORY_SUCCESS);
-  int64_t array_ele_size = wholememory_dtype_get_element_size(array_desc.dtype);
+            WHOLEGRAPH_SUCCESS);
+  int64_t array_ele_size = wholegraph_dtype_get_element_size(array_desc.dtype);
   EXPECT_EQ(local_array_size % array_ele_size, 0);
   EXPECT_EQ(local_array_offset % array_ele_size, 0);
-  wholememory_comm_t wm_comm;
-  EXPECT_EQ(wholememory_get_communicator(&wm_comm, array_handle), WHOLEMEMORY_SUCCESS);
+  wholegraph_comm_t wg_comm;
+  EXPECT_EQ(wholegraph_get_communicator(&wg_comm, array_handle), WHOLEGRAPH_SUCCESS);
 
   if (local_array_size) {
     EXPECT_EQ(cudaMemcpyAsync(local_array_ptr,
@@ -220,20 +220,20 @@ void copy_host_array_to_wholememory(void* host_array,
               cudaSuccess);
     EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
   }
-  wholememory_communicator_barrier(wm_comm);
+  wholegraph_communicator_barrier(wg_comm);
 }
 
 template <typename DataType>
 void host_get_sample_offset(void* host_csr_row_ptr,
-                            wholememory_array_description_t csr_row_ptr_desc,
+                            wholegraph_array_description_t csr_row_ptr_desc,
                             void* host_center_nodes,
-                            wholememory_array_description_t center_node_desc,
+                            wholegraph_array_description_t center_node_desc,
                             int max_sample_count,
                             void* host_ref_output_sample_offset,
-                            wholememory_array_description_t output_sample_offset_desc)
+                            wholegraph_array_description_t output_sample_offset_desc)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
 
   int64_t* csr_row_ptr          = static_cast<int64_t*>(host_csr_row_ptr);
   DataType* center_nodes_ptr    = static_cast<DataType*>(host_center_nodes);
@@ -251,20 +251,20 @@ void host_get_sample_offset(void* host_csr_row_ptr,
 
 template <typename IdType, typename ColIdType>
 void host_sample_all(void* host_csr_row_ptr,
-                     wholememory_array_description_t csr_row_ptr_desc,
+                     wholegraph_array_description_t csr_row_ptr_desc,
                      void* host_csr_col_ptr,
-                     wholememory_array_description_t csr_col_ptr_desc,
+                     wholegraph_array_description_t csr_col_ptr_desc,
                      void* host_center_nodes,
-                     wholememory_array_description_t center_node_desc,
+                     wholegraph_array_description_t center_node_desc,
                      int max_sample_count,
                      void* host_ref_output_sample_offset,
-                     wholememory_array_description_t output_sample_offset_desc,
+                     wholegraph_array_description_t output_sample_offset_desc,
                      void* host_ref_output_dest_nodes,
                      void* host_ref_output_center_nodes_local_id,
                      void* host_ref_output_global_edge_id)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
 
   int64_t* csr_row_ptr          = static_cast<int64_t*>(host_csr_row_ptr);
   ColIdType* csr_col_ptr        = static_cast<ColIdType*>(host_csr_col_ptr);
@@ -312,21 +312,21 @@ void random_sample_without_replacement_cpu_base(std::vector<int>* a,
 template <typename IdType, typename ColIdType>
 void host_unweighted_sample_without_replacement(
   void* host_csr_row_ptr,
-  wholememory_array_description_t csr_row_ptr_desc,
+  wholegraph_array_description_t csr_row_ptr_desc,
   void* host_csr_col_ptr,
-  wholememory_array_description_t csr_col_ptr_desc,
+  wholegraph_array_description_t csr_col_ptr_desc,
   void* host_center_nodes,
-  wholememory_array_description_t center_node_desc,
+  wholegraph_array_description_t center_node_desc,
   int max_sample_count,
   void* host_ref_output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* host_ref_output_dest_nodes,
   void* host_ref_output_center_nodes_local_id,
   void* host_ref_output_global_edge_id,
   unsigned long long random_seed)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
 
   int64_t* csr_row_ptr          = static_cast<int64_t*>(host_csr_row_ptr);
   ColIdType* csr_col_ptr        = static_cast<ColIdType*>(host_csr_col_ptr);
@@ -407,28 +407,28 @@ REGISTER_DISPATCH_TWO_TYPES(HOSTUNWEIGHTEDSAMPLEWITHOUTREPLACEMENT,
 
 void wholegraph_csr_unweighted_sample_without_replacement_cpu(
   void* host_csr_row_ptr,
-  wholememory_array_description_t csr_row_ptr_desc,
+  wholegraph_array_description_t csr_row_ptr_desc,
   void* host_csr_col_ptr,
-  wholememory_array_description_t csr_col_ptr_desc,
+  wholegraph_array_description_t csr_col_ptr_desc,
   void* host_center_nodes,
-  wholememory_array_description_t center_node_desc,
+  wholegraph_array_description_t center_node_desc,
   int max_sample_count,
   void** host_ref_output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void** host_ref_output_dest_nodes,
   void** host_ref_output_center_nodes_local_id,
   void** host_ref_output_global_edge_id,
   int* output_sample_dest_nodes_count,
   unsigned long long random_seed)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
   EXPECT_EQ(output_sample_offset_desc.size, center_node_desc.size + 1);
 
   *host_ref_output_sample_offset =
-    (void*)malloc(wholememory_get_memory_size_from_array(&output_sample_offset_desc));
+    (void*)malloc(wholegraph_get_memory_size_from_array(&output_sample_offset_desc));
 
-  if (center_node_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  if (center_node_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_sample_offset<int64_t>(host_csr_row_ptr,
                                     csr_row_ptr_desc,
                                     host_center_nodes,
@@ -436,7 +436,7 @@ void wholegraph_csr_unweighted_sample_without_replacement_cpu(
                                     max_sample_count,
                                     *host_ref_output_sample_offset,
                                     output_sample_offset_desc);
-  } else if (center_node_desc.dtype == WHOLEMEMORY_DT_INT) {
+  } else if (center_node_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_sample_offset<int>(host_csr_row_ptr,
                                 csr_row_ptr_desc,
                                 host_center_nodes,
@@ -450,7 +450,7 @@ void wholegraph_csr_unweighted_sample_without_replacement_cpu(
     static_cast<int*>(*host_ref_output_sample_offset)[center_node_desc.size];
 
   *host_ref_output_dest_nodes            = malloc((*output_sample_dest_nodes_count) *
-                                       wholememory_dtype_get_element_size(csr_col_ptr_desc.dtype));
+                                       wholegraph_dtype_get_element_size(csr_col_ptr_desc.dtype));
   *host_ref_output_center_nodes_local_id = malloc((*output_sample_dest_nodes_count) * sizeof(int));
   *host_ref_output_global_edge_id = malloc((*output_sample_dest_nodes_count) * sizeof(int64_t));
 
@@ -517,9 +517,9 @@ void check_value_same(void* value, void* ref, int64_t size)
 REGISTER_DISPATCH_ONE_TYPE(CHECKVALUESAME, check_value_same, SINT3264)
 
 void host_check_two_array_same(void* host_array,
-                               wholememory_array_description_t host_array_desc,
+                               wholegraph_array_description_t host_array_desc,
                                void* host_ref,
-                               wholememory_array_description_t host_ref_desc)
+                               wholegraph_array_description_t host_ref_desc)
 {
   EXPECT_EQ(host_array_desc.dtype, host_ref_desc.dtype);
   EXPECT_EQ(host_array_desc.size, host_ref_desc.size);
@@ -559,23 +559,23 @@ float host_gen_key_from_weight(const WeightType weight, raft::random::detail::PC
 template <typename IdType, typename ColIdType, typename WeightType>
 void host_weighted_sample_without_replacement(
   void* host_csr_row_ptr,
-  wholememory_array_description_t csr_row_ptr_desc,
+  wholegraph_array_description_t csr_row_ptr_desc,
   void* host_csr_col_ptr,
-  wholememory_array_description_t csr_col_ptr_desc,
+  wholegraph_array_description_t csr_col_ptr_desc,
   void* host_csr_weight_ptr,
-  wholememory_array_description_t csr_weight_ptr_desc,
+  wholegraph_array_description_t csr_weight_ptr_desc,
   void* host_center_nodes,
-  wholememory_array_description_t center_node_desc,
+  wholegraph_array_description_t center_node_desc,
   int max_sample_count,
   void* host_ref_output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* host_ref_output_dest_nodes,
   void* host_ref_output_center_nodes_local_id,
   void* host_ref_output_global_edge_id,
   unsigned long long random_seed)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
 
   int64_t* csr_row_ptr          = static_cast<int64_t*>(host_csr_row_ptr);
   ColIdType* csr_col_ptr        = static_cast<ColIdType*>(host_csr_col_ptr);
@@ -663,28 +663,28 @@ REGISTER_DISPATCH_THREE_TYPES(HOSTWEIGHTEDSAMPLEWITHOUTREPLACEMENT,
 
 void wholegraph_csr_weighted_sample_without_replacement_cpu(
   void* host_csr_row_ptr,
-  wholememory_array_description_t csr_row_ptr_desc,
+  wholegraph_array_description_t csr_row_ptr_desc,
   void* host_csr_col_ptr,
-  wholememory_array_description_t csr_col_ptr_desc,
+  wholegraph_array_description_t csr_col_ptr_desc,
   void* host_csr_weight_ptr,
-  wholememory_array_description_t csr_weight_ptr_desc,
+  wholegraph_array_description_t csr_weight_ptr_desc,
   void* host_center_nodes,
-  wholememory_array_description_t center_node_desc,
+  wholegraph_array_description_t center_node_desc,
   int max_sample_count,
   void** host_ref_output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void** host_ref_output_dest_nodes,
   void** host_ref_output_center_nodes_local_id,
   void** host_ref_output_global_edge_id,
   int* output_sample_dest_nodes_count,
   unsigned long long random_seed)
 {
-  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEMEMORY_DT_INT64);
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_desc.dtype, WHOLEGRAPH_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
   EXPECT_EQ(output_sample_offset_desc.size, center_node_desc.size + 1);
   *host_ref_output_sample_offset =
-    (void*)malloc(wholememory_get_memory_size_from_array(&output_sample_offset_desc));
-  if (center_node_desc.dtype == WHOLEMEMORY_DT_INT64) {
+    (void*)malloc(wholegraph_get_memory_size_from_array(&output_sample_offset_desc));
+  if (center_node_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_sample_offset<int64_t>(host_csr_row_ptr,
                                     csr_row_ptr_desc,
                                     host_center_nodes,
@@ -692,7 +692,7 @@ void wholegraph_csr_weighted_sample_without_replacement_cpu(
                                     max_sample_count,
                                     *host_ref_output_sample_offset,
                                     output_sample_offset_desc);
-  } else if (center_node_desc.dtype == WHOLEMEMORY_DT_INT) {
+  } else if (center_node_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_sample_offset<int>(host_csr_row_ptr,
                                 csr_row_ptr_desc,
                                 host_center_nodes,
@@ -706,7 +706,7 @@ void wholegraph_csr_weighted_sample_without_replacement_cpu(
     static_cast<int*>(*host_ref_output_sample_offset)[center_node_desc.size];
 
   *host_ref_output_dest_nodes            = malloc((*output_sample_dest_nodes_count) *
-                                       wholememory_dtype_get_element_size(csr_col_ptr_desc.dtype));
+                                       wholegraph_dtype_get_element_size(csr_col_ptr_desc.dtype));
   *host_ref_output_center_nodes_local_id = malloc((*output_sample_dest_nodes_count) * sizeof(int));
   *host_ref_output_global_edge_id = malloc((*output_sample_dest_nodes_count) * sizeof(int64_t));
   if (max_sample_count <= 0) {
@@ -752,11 +752,11 @@ void wholegraph_csr_weighted_sample_without_replacement_cpu(
 
 template <typename DataType>
 void host_get_segment_sort(void* host_output_sample_offset,
-                           wholememory_array_description_t output_sample_offset_desc,
+                           wholegraph_array_description_t output_sample_offset_desc,
                            void* host_output_dest_nodes,
-                           wholememory_array_description_t output_dest_nodes_desc,
+                           wholegraph_array_description_t output_dest_nodes_desc,
                            void* host_output_global_edge_id,
-                           wholememory_array_description_t output_global_edge_id_desc)
+                           wholegraph_array_description_t output_global_edge_id_desc)
 {
   int* output_sample_offset_ptr      = static_cast<int*>(host_output_sample_offset);
   DataType* output_dest_nodes_ptr    = static_cast<DataType*>(host_output_dest_nodes);
@@ -771,23 +771,23 @@ void host_get_segment_sort(void* host_output_sample_offset,
 }
 
 void segment_sort_output(void* host_output_sample_offset,
-                         wholememory_array_description_t output_sample_offset_desc,
+                         wholegraph_array_description_t output_sample_offset_desc,
                          void* host_output_dest_nodes,
-                         wholememory_array_description_t output_dest_nodes_desc,
+                         wholegraph_array_description_t output_dest_nodes_desc,
                          void* host_output_global_edge_id,
-                         wholememory_array_description_t output_global_edge_id_desc)
+                         wholegraph_array_description_t output_global_edge_id_desc)
 {
-  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEMEMORY_DT_INT);
-  EXPECT_EQ(output_global_edge_id_desc.dtype, WHOLEMEMORY_DT_INT64);
+  EXPECT_EQ(output_sample_offset_desc.dtype, WHOLEGRAPH_DT_INT);
+  EXPECT_EQ(output_global_edge_id_desc.dtype, WHOLEGRAPH_DT_INT64);
 
-  if (output_dest_nodes_desc.dtype == WHOLEMEMORY_DT_INT) {
+  if (output_dest_nodes_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_segment_sort<int>(host_output_sample_offset,
                                output_sample_offset_desc,
                                host_output_dest_nodes,
                                output_dest_nodes_desc,
                                host_output_global_edge_id,
                                output_global_edge_id_desc);
-  } else if (output_dest_nodes_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  } else if (output_dest_nodes_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_segment_sort<int64_t>(host_output_sample_offset,
                                    output_sample_offset_desc,
                                    host_output_dest_nodes,

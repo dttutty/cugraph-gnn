@@ -12,8 +12,8 @@ fi
 
 source rapids-init-pip
 
-LIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libwholegraph cugraph-gnn --cuda "$RAPIDS_CUDA_VERSION")")
-PYLIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python pylibwholegraph cugraph-gnn --stable --cuda "$RAPIDS_CUDA_VERSION")")
+LIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libwholegraph cugraph --cuda "$RAPIDS_CUDA_VERSION")")
+PYLIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python pylibwholegraph cugraph --stable --cuda "$RAPIDS_CUDA_VERSION")")
 
 RAPIDS_TESTS_DIR=${RAPIDS_TESTS_DIR:-"${PWD}/test-results"}
 RAPIDS_COVERAGE_DIR=${RAPIDS_COVERAGE_DIR:-"${PWD}/coverage-results"}
@@ -29,43 +29,12 @@ PIP_INSTALL_ARGS=(
   "${LIBWHOLEGRAPH_WHEELHOUSE}"/*.whl
 )
 
-# ensure a CUDA variant of 'torch' is used (if one is available)
-TORCH_WHEEL_DIR="$(mktemp -d)"
-./ci/download-torch-wheels.sh "${TORCH_WHEEL_DIR}"
-
-# 'pylibwholegraph' is still expected to be importable
-# and testable in an environment where 'torch' isn't installed.
-torch_downloaded=true
-if [ -z "$(ls -A "${TORCH_WHEEL_DIR}" 2>/dev/null)" ]; then
-  rapids-echo-stderr "No 'torch' wheels downloaded."
-  torch_downloaded=false
-else
-  PIP_INSTALL_ARGS+=("${TORCH_WHEEL_DIR}"/torch-*.whl)
-fi
-
-# echo to expand wildcard before adding `[extra]` requires for pip
 rapids-logger "Installing Packages"
 rapids-pip-retry install \
     "${PIP_INSTALL_ARGS[@]}"
 
-
-if [[ "${torch_downloaded}" == "true" ]]; then
-  # 'torch' is an optional dependency of 'pylibwholegraph'... confirm that it's actually
-  # installed here and that we've installed a package with CUDA support.
-  rapids-logger "Confirming that PyTorch is installed"
-  python -c "import torch; assert torch.cuda.is_available()"
-
-  rapids-logger "pytest pylibwholegraph (with 'torch')"
-  ./ci/run_pylibwholegraph_pytests.sh \
-    --cov-config=../../.coveragerc \
-    --cov=pylibwholegraph \
-    --cov-fail-under=15
-fi
-
-rapids-logger "import pylibwholegraph (no 'torch')"
-./ci/uninstall-torch-wheels.sh
-
+rapids-logger "import pylibwholegraph"
 python -c "import pylibwholegraph; print(f'pylibwholegraph version: {pylibwholegraph.__version__}')"
 
-rapids-logger "pytest pylibwholegraph (no 'torch')"
+rapids-logger "pytest pylibwholegraph"
 ./ci/run_pylibwholegraph_pytests.sh

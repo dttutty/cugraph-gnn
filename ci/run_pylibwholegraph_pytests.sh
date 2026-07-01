@@ -5,6 +5,6 @@
 set -euo pipefail
 
 # Support invoking run_pytests.sh outside the script directory
-cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")"/../python/pylibwholegraph/pylibwholegraph/
+cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")"/../python/pylibwholegraph
 
 pytest -rs --cache-clear --forked --import-mode=append "$@" tests

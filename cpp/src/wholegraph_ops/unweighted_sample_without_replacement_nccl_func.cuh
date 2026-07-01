@@ -12,41 +12,41 @@
 #include <raft/random/rng_device.cuh>
 #include <raft/random/rng_state.hpp>
 #include <raft/util/integer_utils.hpp>
-#include <wholememory/device_reference.cuh>
-#include <wholememory/env_func_ptrs.h>
-#include <wholememory/global_reference.h>
-#include <wholememory/tensor_description.h>
-#include <wholememory/wholememory_tensor.h>
+#include <wholegraph/device_reference.cuh>
+#include <wholegraph/env_func_ptrs.h>
+#include <wholegraph/global_reference.h>
+#include <wholegraph/tensor_description.h>
+#include <wholegraph/wholegraph_tensor.h>
 
-#include "wholememory_ops/output_memory_handle.hpp"
-#include "wholememory_ops/temp_memory_handle.hpp"
-#include "wholememory_ops/thrust_allocator.hpp"
+#include "wholegraph_tensor_ops/output_memory_handle.hpp"
+#include "wholegraph_tensor_ops/temp_memory_handle.hpp"
+#include "wholegraph_tensor_ops/thrust_allocator.hpp"
 
 #include "cuda_macros.hpp"
 #include "error.hpp"
 #include "sample_comm.cuh"
 
-#include "wholememory_ops/gather_op_impl.h"
-using wholememory_ops::wholememory_gather_nccl;
+#include "wholegraph_tensor_ops/gather_op_impl.h"
+using wholegraph_tensor_ops::wholegraph_gather_nccl;
 #define WARP_SIZE 32
 
 namespace wholegraph_ops {
 
 template <typename IdType,
           typename LocalIdType,
-          typename WMIdType,
+          typename WGIdType,
           typename DegreeType,
           int BLOCK_DIM        = 32,
           int ITEMS_PER_THREAD = 1>
 __global__ void unweighted_sample_without_replacement_nccl_kernel(
   const IdType* input_nodes,
-  const WMIdType* csr_row_ptr_sta,
+  const WGIdType* csr_row_ptr_sta,
   const DegreeType* in_degree,
   const int input_node_count,
   const int max_sample_count,
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate,
   const int* sample_offset,
-  wholememory_array_description_t sample_offset_desc,
+  wholegraph_array_description_t sample_offset_desc,
   int* src_lid,
   int64_t* output_edge_gid_ptr)
 {
@@ -55,8 +55,8 @@ __global__ void unweighted_sample_without_replacement_nccl_kernel(
   int input_idx = blockIdx.x;
   if (input_idx >= input_node_count) return;
 
-  WMIdType start     = csr_row_ptr_sta[input_idx];
-  WMIdType end       = start + in_degree[input_idx];
+  WGIdType start     = csr_row_ptr_sta[input_idx];
+  WGIdType end       = start + in_degree[input_idx];
   int neighbor_count = (int)(in_degree[input_idx]);
   if (neighbor_count <= 0) return;
   int offset = sample_offset[input_idx];
@@ -179,43 +179,43 @@ __global__ void unweighted_sample_without_replacement_nccl_kernel(
   }
 }
 
-template <typename IdType, typename WMIdType>
+template <typename IdType, typename WGIdType>
 void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
-  wholememory_handle_t csr_row_wholememory_handle,
-  wholememory_handle_t csr_col_wholememory_handle,
-  wholememory_tensor_description_t wm_csr_row_ptr_desc,
-  wholememory_tensor_description_t wm_csr_col_ptr_desc,
+  wholegraph_handle_t csr_row_wholegraph_handle,
+  wholegraph_handle_t csr_col_wholegraph_handle,
+  wholegraph_tensor_description_t wg_csr_row_ptr_desc,
+  wholegraph_tensor_description_t wg_csr_col_ptr_desc,
   void* center_nodes,
-  wholememory_array_description_t center_nodes_desc,
+  wholegraph_array_description_t center_nodes_desc,
   int max_sample_count,
   void* output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* output_dest_memory_context,
   void* output_center_localid_memory_context,
   void* output_edge_gid_memory_context,
   unsigned long long random_seed,
-  wholememory_env_func_t* p_env_fns,
+  wholegraph_env_func_t* p_env_fns,
   cudaStream_t stream)
 {
   int center_node_count = center_nodes_desc.size;
-  WHOLEMEMORY_EXPECTS(wm_csr_row_ptr_desc.dtype == WHOLEMEMORY_DT_INT64,
+  WHOLEGRAPH_EXPECTS(wg_csr_row_ptr_desc.dtype == WHOLEGRAPH_DT_INT64,
                       "wholegraph_csr_unweighted_sample_without_replacement_nccl_func(). "
-                      "wm_csr_row_ptr_desc.dtype != WHOLEMEMORY_DT_INT64, "
-                      "wm_csr_row_ptr_desc.dtype = %d",
-                      wm_csr_row_ptr_desc.dtype);
+                      "wg_csr_row_ptr_desc.dtype != WHOLEGRAPH_DT_INT64, "
+                      "wg_csr_row_ptr_desc.dtype = %d",
+                      wg_csr_row_ptr_desc.dtype);
 
-  WHOLEMEMORY_EXPECTS(output_sample_offset_desc.dtype == WHOLEMEMORY_DT_INT,
+  WHOLEGRAPH_EXPECTS(output_sample_offset_desc.dtype == WHOLEGRAPH_DT_INT,
                       "wholegraph_csr_unweighted_sample_without_replacement_nccl_func(). "
-                      "output_sample_offset_desc.dtype != WHOLEMEMORY_DT_INT, "
+                      "output_sample_offset_desc.dtype != WHOLEGRAPH_DT_INT, "
                       "output_sample_offset_desc.dtype = %d",
                       output_sample_offset_desc.dtype);
 
   auto double_center_node_count = center_node_count + center_node_count;
-  wholememory_ops::temp_memory_handle center_nodes_buf(p_env_fns);
+  wholegraph_tensor_ops::temp_memory_handle center_nodes_buf(p_env_fns);
   IdType* center_nodes_expandshift_one = static_cast<IdType*>(
     center_nodes_buf.device_malloc(double_center_node_count, center_nodes_desc.dtype));
   // fill center_nodes_shift_one with [center_nodes, center_nodes+1]
-  wholememory_ops::wm_thrust_allocator thrust_allocator(p_env_fns);
+  wholegraph_tensor_ops::wg_thrust_allocator thrust_allocator(p_env_fns);
   thrust::counting_iterator<int64_t> iota(0);
   thrust::for_each(thrust::cuda::par_nosync(thrust_allocator).on(stream),
                    iota,
@@ -224,17 +224,17 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
                      (const IdType*)center_nodes, center_nodes_expandshift_one, center_node_count});
 
   // gathering [rowoffsets, rowoffsets+1]
-  wholememory_ops::temp_memory_handle output_buf(p_env_fns);
+  wholegraph_tensor_ops::temp_memory_handle output_buf(p_env_fns);
   int64_t* center_nodes_indptr =
-    static_cast<int64_t*>(output_buf.device_malloc(double_center_node_count, WHOLEMEMORY_DT_INT64));
-  wholememory_array_description_t center_nodes_expandshift_one_desc{
+    static_cast<int64_t*>(output_buf.device_malloc(double_center_node_count, WHOLEGRAPH_DT_INT64));
+  wholegraph_array_description_t center_nodes_expandshift_one_desc{
     double_center_node_count, 0, center_nodes_desc.dtype};
-  wholememory_matrix_description_t center_nodes_indptr_desc{
-    {double_center_node_count, 1}, 1, 0, wm_csr_row_ptr_desc.dtype};
-  wholememory_matrix_description_t wm_csr_row_ptr_mat_desc;
-  wholememory_convert_tensor_desc_to_matrix(&wm_csr_row_ptr_mat_desc, &wm_csr_row_ptr_desc);
-  wholememory_ops::wholememory_gather_nccl(csr_row_wholememory_handle,
-                                           wm_csr_row_ptr_mat_desc,
+  wholegraph_matrix_description_t center_nodes_indptr_desc{
+    {double_center_node_count, 1}, 1, 0, wg_csr_row_ptr_desc.dtype};
+  wholegraph_matrix_description_t wg_csr_row_ptr_mat_desc;
+  wholegraph_convert_tensor_desc_to_matrix(&wg_csr_row_ptr_mat_desc, &wg_csr_row_ptr_desc);
+  wholegraph_tensor_ops::wholegraph_gather_nccl(csr_row_wholegraph_handle,
+                                           wg_csr_row_ptr_mat_desc,
                                            center_nodes_expandshift_one,
                                            center_nodes_expandshift_one_desc,
                                            center_nodes_indptr,
@@ -245,9 +245,9 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
   // find the in_degree (subtraction) and sample count
   // temporarily store sampled_csr_ptr_buf (# of degrees/samples per node) in int32;
   // can be changed to int8_t/16_t later
-  wholememory_ops::temp_memory_handle sampled_csr_ptr_buf(p_env_fns);
+  wholegraph_tensor_ops::temp_memory_handle sampled_csr_ptr_buf(p_env_fns);
   int* in_degree =
-    static_cast<int*>(sampled_csr_ptr_buf.device_malloc(center_node_count + 1, WHOLEMEMORY_DT_INT));
+    static_cast<int*>(sampled_csr_ptr_buf.device_malloc(center_node_count + 1, WHOLEGRAPH_DT_INT));
   thrust::for_each(
     thrust::cuda::par_nosync(thrust_allocator).on(stream),
     iota,
@@ -264,35 +264,35 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
                                    thrust::plus<int>());
   // start local sampling
   int count;
-  WM_CUDA_CHECK(cudaMemcpyAsync(&count,
+  WG_CUDA_CHECK(cudaMemcpyAsync(&count,
                                 ((int*)output_sample_offset) + center_node_count,
                                 sizeof(int),
                                 cudaMemcpyDeviceToHost,
                                 stream));
-  WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+  WG_CUDA_CHECK(cudaStreamSynchronize(stream));
 
   int64_t* output_edge_gid_ptr = nullptr;
-  wholememory_ops::temp_memory_handle edge_gid_buffer_mh(p_env_fns);
+  wholegraph_tensor_ops::temp_memory_handle edge_gid_buffer_mh(p_env_fns);
   if (output_edge_gid_memory_context) {
-    wholememory_ops::output_memory_handle gen_output_edge_gid_buffer_mh(
+    wholegraph_tensor_ops::output_memory_handle gen_output_edge_gid_buffer_mh(
       p_env_fns, output_edge_gid_memory_context);
     output_edge_gid_ptr =
-      (int64_t*)gen_output_edge_gid_buffer_mh.device_malloc(count, WHOLEMEMORY_DT_INT64);
+      (int64_t*)gen_output_edge_gid_buffer_mh.device_malloc(count, WHOLEGRAPH_DT_INT64);
   } else {
-    output_edge_gid_ptr = (int64_t*)edge_gid_buffer_mh.device_malloc(count, WHOLEMEMORY_DT_INT64);
+    output_edge_gid_ptr = (int64_t*)edge_gid_buffer_mh.device_malloc(count, WHOLEGRAPH_DT_INT64);
   }
 
-  wholememory_ops::output_memory_handle gen_output_dest_buffer_mh(p_env_fns,
+  wholegraph_tensor_ops::output_memory_handle gen_output_dest_buffer_mh(p_env_fns,
                                                                   output_dest_memory_context);
-  WMIdType* output_dest_node_ptr =
-    (WMIdType*)gen_output_dest_buffer_mh.device_malloc(count, wm_csr_col_ptr_desc.dtype);
+  WGIdType* output_dest_node_ptr =
+    (WGIdType*)gen_output_dest_buffer_mh.device_malloc(count, wg_csr_col_ptr_desc.dtype);
 
   int* output_center_localid_ptr = nullptr;
   if (output_center_localid_memory_context) {
-    wholememory_ops::output_memory_handle gen_output_center_localid_buffer_mh(
+    wholegraph_tensor_ops::output_memory_handle gen_output_center_localid_buffer_mh(
       p_env_fns, output_center_localid_memory_context);
     output_center_localid_ptr =
-      (int*)gen_output_center_localid_buffer_mh.device_malloc(count, WHOLEMEMORY_DT_INT);
+      (int*)gen_output_center_localid_buffer_mh.device_malloc(count, WHOLEGRAPH_DT_INT);
   }
   raft::random::RngState _rngstate(random_seed, 0, raft::random::GeneratorType::GenPC);
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate(_rngstate);
@@ -305,7 +305,7 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
       const int max_sample_count,
       raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate,
       const int* sample_offset,
-      wholememory_array_description_t sample_offset_desc,
+      wholegraph_array_description_t sample_offset_desc,
       int* src_lid,
       int64_t* output_edge_gid_ptr);
     static const unweighted_sample_func_type func_array[32] = {
@@ -356,13 +356,13 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
       (int*)output_center_localid_ptr,
       (int64_t*)output_edge_gid_ptr);
 
-    wholememory_matrix_description_t wm_csr_col_ptr_mat_desc;
-    wholememory_matrix_description_t output_dest_node_ptr_desc{
-      {count, 1}, 1, 0, wm_csr_col_ptr_desc.dtype};
-    wholememory_array_description_t output_edge_gid_ptr_desc{count, 0, WHOLEMEMORY_DT_INT64};
-    wholememory_convert_tensor_desc_to_matrix(&wm_csr_col_ptr_mat_desc, &wm_csr_col_ptr_desc);
-    wholememory_ops::wholememory_gather_nccl(csr_col_wholememory_handle,
-                                             wm_csr_col_ptr_mat_desc,
+    wholegraph_matrix_description_t wg_csr_col_ptr_mat_desc;
+    wholegraph_matrix_description_t output_dest_node_ptr_desc{
+      {count, 1}, 1, 0, wg_csr_col_ptr_desc.dtype};
+    wholegraph_array_description_t output_edge_gid_ptr_desc{count, 0, WHOLEGRAPH_DT_INT64};
+    wholegraph_convert_tensor_desc_to_matrix(&wg_csr_col_ptr_mat_desc, &wg_csr_col_ptr_desc);
+    wholegraph_tensor_ops::wholegraph_gather_nccl(csr_col_wholegraph_handle,
+                                             wg_csr_col_ptr_mat_desc,
                                              output_edge_gid_ptr,
                                              output_edge_gid_ptr_desc,
                                              output_dest_node_ptr,
@@ -371,7 +371,7 @@ void wholegraph_csr_unweighted_sample_without_replacement_nccl_func(
                                              stream,
                                              -1);
   }
-  WM_CUDA_CHECK(cudaGetLastError());
-  WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+  WG_CUDA_CHECK(cudaGetLastError());
+  WG_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 }  // namespace wholegraph_ops
