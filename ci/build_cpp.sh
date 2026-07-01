@@ -11,19 +11,15 @@ export CMAKE_GENERATOR=Ninja
 
 rapids-print-env
 
-rapids-logger "Begin cpp build"
+rapids-logger "Begin libwholegraph conda build"
 
 sccache --stop-server 2>/dev/null || true
 
 RAPIDS_PACKAGE_VERSION=$(rapids-generate-version)
 export RAPIDS_PACKAGE_VERSION
 
-# populates `RATTLER_CHANNELS` array and `RATTLER_ARGS` array
 source rapids-rattler-channel-string
 
-# --no-build-id allows for caching with `sccache`
-# more info is available at
-# https://rattler.build/latest/tips_and_tricks/#using-sccache-or-ccache-with-rattler-build
 rattler-build build --recipe conda/recipes/libwholegraph \
                     "${RATTLER_ARGS[@]}" \
                     "${RATTLER_CHANNELS[@]}"
@@ -31,5 +27,5 @@ rattler-build build --recipe conda/recipes/libwholegraph \
 sccache --show-adv-stats
 sccache --stop-server >/dev/null 2>&1 || true
 
-RAPIDS_PACKAGE_NAME="$(rapids-artifact-name conda_cpp libwholegraph cugraph-gnn --cuda "$RAPIDS_CUDA_VERSION")"
+RAPIDS_PACKAGE_NAME="$(rapids-artifact-name conda_cpp libwholegraph cugraph --cuda "$RAPIDS_CUDA_VERSION")"
 export RAPIDS_PACKAGE_NAME

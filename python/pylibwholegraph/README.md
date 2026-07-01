@@ -1,5 +1,6 @@
 # pylibwholegraph
 
-WholeGraph supports PyTorch and provides a distributed graph and kv store.
+pylibwholegraph provides the Python bindings for the native WholeGraph library.
 
-cuGraph-PyG can leverage WholeGraph for even greater scalability.
+PyTorch-facing WholeGraph adapters live in `wholegraph-torch`; cuGraph-PyG
+builds on that adapter package for distributed tensor and embedding storage.

@@ -36,9 +36,9 @@ TEST(ParallelUtilsTest, MultiProcessRun)
     reinterpret_cast<std::atomic<int>*>(thread_count)->fetch_add(1);
     reinterpret_cast<std::atomic<int>*>(thread_mask)->fetch_or(1 << rank);
     EXPECT_EQ(world_size, 8);
-    // need to manually check gtest failures and modify exit code, WHOLEMEMORY_CHECK can help do
+    // need to manually check gtest failures and modify exit code, WHOLEGRAPH_CHECK can help do
     // thisl
-    WHOLEMEMORY_CHECK(::testing::Test::HasFailure() == false);
+    WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
   });
   EXPECT_EQ(*thread_count, 8);
   EXPECT_EQ(*thread_mask, (1 << 8) - 1);
@@ -54,9 +54,9 @@ TEST(ParallelUtilsTest, PipeBroadcast)
       int data = rank * 10;
       PipeBroadcast(rank, world_size, root, pipes, &data);
       EXPECT_EQ(data, root * 10);
-      // need to manually check gtest failures and modify exit code, WHOLEMEMORY_CHECK can help do
+      // need to manually check gtest failures and modify exit code, WHOLEGRAPH_CHECK can help do
       // thisl
-      WHOLEMEMORY_CHECK(::testing::Test::HasFailure() == false);
+      WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
     });
   }
   ClosePipes(&pipes);
@@ -74,9 +74,9 @@ TEST(ParallelUtilsTest, GroupPipeBroadcast)
       PipeGroupBroadcast(rank, world_size, group_root, group_size, pipes, &data);
       int rank_group_root = group_root + rank / group_size * group_size;
       EXPECT_EQ(data, rank_group_root * 10);
-      // need to manually check gtest failures and modify exit code, WHOLEMEMORY_CHECK can help do
+      // need to manually check gtest failures and modify exit code, WHOLEGRAPH_CHECK can help do
       // thisl
-      WHOLEMEMORY_CHECK(::testing::Test::HasFailure() == false);
+      WHOLEGRAPH_CHECK(::testing::Test::HasFailure() == false);
     });
   }
   ClosePipes(&pipes);

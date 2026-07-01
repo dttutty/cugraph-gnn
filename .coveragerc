@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+# Coverage configuration for the split Python package layout.
+[run]
+branch = True
+source =
+    cugraph_pyg
+    pylibwholegraph
+    wholegraph_torch
+omit =
+    */examples/*
+    */tests/*
+    */test_*.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:

@@ -8,8 +8,8 @@
 #include <experimental/random>
 #include <gtest/gtest.h>
 #include <random>
-#include <wholememory/graph_op.h>
-#include <wholememory_ops/register.hpp>
+#include <wholegraph/graph_op.h>
+#include <wholegraph_tensor_ops/register.hpp>
 
 namespace graph_ops {
 namespace testing {
@@ -19,9 +19,9 @@ void host_get_local_csr_graph(int row_num,
                               int col_num,
                               int graph_edge_num,
                               void* host_csr_row_ptr,
-                              wholememory_array_description_t csr_row_ptr_desc,
+                              wholegraph_array_description_t csr_row_ptr_desc,
                               void* host_csr_col_ptr,
-                              wholememory_array_description_t csr_col_ptr_desc)
+                              wholegraph_array_description_t csr_col_ptr_desc)
 {
   RowPtrType* csr_row_ptr  = static_cast<RowPtrType*>(host_csr_row_ptr);
   ColIdType* csr_col_ptr   = static_cast<ColIdType*>(host_csr_col_ptr);
@@ -88,7 +88,7 @@ REGISTER_DISPATCH_TWO_TYPES(HOSTGETLOCALCSRGRAPH, host_get_local_csr_graph, SINT
 
 template <typename DataType>
 void get_random_float_array(void* host_csr_weight_ptr,
-                            wholememory_array_description_t graph_csr_weight_ptr_desc)
+                            wholegraph_array_description_t graph_csr_weight_ptr_desc)
 {
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -102,11 +102,11 @@ void gen_local_csr_graph(int row_num,
                          int col_num,
                          int graph_edge_num,
                          void* host_csr_row_ptr,
-                         wholememory_array_description_t csr_row_ptr_desc,
+                         wholegraph_array_description_t csr_row_ptr_desc,
                          void* host_csr_col_ptr,
-                         wholememory_array_description_t csr_col_ptr_desc,
+                         wholegraph_array_description_t csr_col_ptr_desc,
                          void* host_csr_weight_ptr,
-                         wholememory_array_description_t csr_weight_ptr_desc)
+                         wholegraph_array_description_t csr_weight_ptr_desc)
 {
   DISPATCH_TWO_TYPES(csr_row_ptr_desc.dtype,
                      csr_col_ptr_desc.dtype,
@@ -119,22 +119,22 @@ void gen_local_csr_graph(int row_num,
                      host_csr_col_ptr,
                      csr_col_ptr_desc);
   if (host_csr_weight_ptr != nullptr) {
-    if (csr_weight_ptr_desc.dtype == WHOLEMEMORY_DT_FLOAT) {
+    if (csr_weight_ptr_desc.dtype == WHOLEGRAPH_DT_FLOAT) {
       get_random_float_array<float>(host_csr_weight_ptr, csr_weight_ptr_desc);
-    } else if (csr_weight_ptr_desc.dtype == WHOLEMEMORY_DT_DOUBLE) {
+    } else if (csr_weight_ptr_desc.dtype == WHOLEGRAPH_DT_DOUBLE) {
       get_random_float_array<double>(host_csr_weight_ptr, csr_weight_ptr_desc);
     }
   }
 }
 
 void host_get_csr_add_self_loop(int* host_csr_row_ptr,
-                                wholememory_array_description_t csr_row_ptr_array_desc,
+                                wholegraph_array_description_t csr_row_ptr_array_desc,
                                 int* host_csr_col_ptr,
-                                wholememory_array_description_t csr_col_ptr_array_desc,
+                                wholegraph_array_description_t csr_col_ptr_array_desc,
                                 int* host_ref_output_csr_row_ptr,
-                                wholememory_array_description_t output_csr_row_ptr_array_desc,
+                                wholegraph_array_description_t output_csr_row_ptr_array_desc,
                                 int* host_ref_output_csr_col_ptr,
-                                wholememory_array_description_t output_csr_col_ptr_array_desc)
+                                wholegraph_array_description_t output_csr_col_ptr_array_desc)
 {
   for (int64_t row_id = 0; row_id < csr_row_ptr_array_desc.size - 1; row_id++) {
     int start                                   = host_csr_row_ptr[row_id];
@@ -150,18 +150,18 @@ void host_get_csr_add_self_loop(int* host_csr_row_ptr,
 }
 
 void host_csr_add_self_loop(void* host_csr_row_ptr,
-                            wholememory_array_description_t csr_row_ptr_array_desc,
+                            wholegraph_array_description_t csr_row_ptr_array_desc,
                             void* host_csr_col_ptr,
-                            wholememory_array_description_t csr_col_ptr_array_desc,
+                            wholegraph_array_description_t csr_col_ptr_array_desc,
                             void* host_ref_output_csr_row_ptr,
-                            wholememory_array_description_t output_csr_row_ptr_array_desc,
+                            wholegraph_array_description_t output_csr_row_ptr_array_desc,
                             void* host_ref_output_csr_col_ptr,
-                            wholememory_array_description_t output_csr_col_ptr_array_desc)
+                            wholegraph_array_description_t output_csr_col_ptr_array_desc)
 {
-  EXPECT_EQ(csr_row_ptr_array_desc.dtype, WHOLEMEMORY_DT_INT);
-  EXPECT_EQ(csr_col_ptr_array_desc.dtype, WHOLEMEMORY_DT_INT);
-  EXPECT_EQ(output_csr_row_ptr_array_desc.dtype, WHOLEMEMORY_DT_INT);
-  EXPECT_EQ(output_csr_col_ptr_array_desc.dtype, WHOLEMEMORY_DT_INT);
+  EXPECT_EQ(csr_row_ptr_array_desc.dtype, WHOLEGRAPH_DT_INT);
+  EXPECT_EQ(csr_col_ptr_array_desc.dtype, WHOLEGRAPH_DT_INT);
+  EXPECT_EQ(output_csr_row_ptr_array_desc.dtype, WHOLEGRAPH_DT_INT);
+  EXPECT_EQ(output_csr_col_ptr_array_desc.dtype, WHOLEGRAPH_DT_INT);
   EXPECT_EQ(csr_row_ptr_array_desc.size, output_csr_row_ptr_array_desc.size);
   EXPECT_EQ(csr_col_ptr_array_desc.size + csr_row_ptr_array_desc.size - 1,
             output_csr_col_ptr_array_desc.size);

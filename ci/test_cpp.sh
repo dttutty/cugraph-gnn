@@ -4,7 +4,6 @@
 
 set -euo pipefail
 
-# Support invoking test_cpp.sh outside the script directory
 cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")"/../
 
 . /opt/conda/etc/profile.d/conda.sh
@@ -12,19 +11,18 @@ cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")"/../
 rapids-logger "Configuring conda strict channel priority"
 conda config --set channel_priority strict
 
-CPP_CHANNEL=$(rapids-download-from-github "$(rapids-artifact-name conda_cpp libwholegraph cugraph-gnn --cuda "$RAPIDS_CUDA_VERSION")")
+CPP_CHANNEL=$(rapids-download-from-github "$(rapids-artifact-name conda_cpp libwholegraph cugraph --cuda "$RAPIDS_CUDA_VERSION")")
 
 rapids-logger "Generate C++ testing dependencies"
 rapids-dependency-file-generator \
   --output conda \
-  --file-key test_cpp \
+  --file-key test_wholegraph_cpp \
   --matrix "cuda=${RAPIDS_CUDA_VERSION%.*};arch=$(arch)" \
   --prepend-channel "${CPP_CHANNEL}" \
   | tee env.yaml
 
 rapids-mamba-retry env create --yes -f env.yaml -n test
 
-# Temporarily allow unbound variables for conda activation.
 set +u
 conda activate test
 set -u
@@ -37,8 +35,7 @@ rapids-print-env
 rapids-logger "Check GPU usage"
 nvidia-smi
 
-# Run libwholegraph tests from libwholegraph-tests package
-rapids-logger "Run tests"
+rapids-logger "Run libwholegraph tests"
 ./ci/run_ctests.sh && EXITCODE=$? || EXITCODE=$?
 
 rapids-logger "Test script exiting with value: $EXITCODE"

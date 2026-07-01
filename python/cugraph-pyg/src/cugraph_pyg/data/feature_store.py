@@ -1,0 +1,249 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+import warnings
+
+from typing import Optional, Tuple, List
+
+from wholegraph_torch.distributed_tensor import DistEmbedding, DistTensor
+from wholegraph_torch.distributed_tensor_utils import is_empty
+from wholegraph_torch.storage_backend import StoragePolicy, resolve_storage_policy
+
+from cugraph_pyg.utils.imports import import_optional, MissingModule
+
+
+# Have to use import_optional even though these are required
+# dependencies in order to build properly.
+torch = import_optional("torch")
+torch_geometric = import_optional("torch_geometric")
+
+
+# If 'torch_geometric' is available but 'torch' is not, accessing
+# 'torch_geometric.data.GraphStore' will fail because `torch_geometric`
+# unconditionally imports 'torch'... so need to check that both are available.
+class FeatureStore(
+    object
+    if (isinstance(torch_geometric, MissingModule) or isinstance(torch, MissingModule))
+    else torch_geometric.data.FeatureStore
+):
+    """
+    A basic implementation of the PyG FeatureStore interface that stores
+    feature data in WholeGraph.  This type of feature store is
+    distributed, and avoids data replication across workers.
+
+    Data should be sliced before being passed into this feature store.
+    That means each worker should have its own partition and put_tensor
+    should be called for each worker's local partition.  When calling
+    get_tensor, multi_get_tensor, etc., the entire tensor can be accessed
+    regardless of what worker's partition the desired slice of the tensor
+    is on.
+    """
+
+    def __init__(
+        self,
+        memory_type=None,
+        location="cpu",
+        *,
+        storage_policy: Optional[StoragePolicy] = None,
+    ):
+        """
+        Constructs an empty FeatureStore.
+
+        Parameters
+        ----------
+        memory_type: str (optional, default=None)
+            Has no effect.  Retained for compatibility purposes.
+
+        location: str(optional, default='cpu')
+            The location ('cpu' or 'cuda') where data is stored.
+
+        storage_policy: StoragePolicy (optional, default=None)
+            Resolved WholeGraph storage policy.  If provided, this policy
+            supplies the location and backend used for WholeGraph tensors.
+        """
+        super().__init__()
+
+        self.__features = {}
+
+        self.__storage_policy = storage_policy or resolve_storage_policy(
+            location=location
+        )
+        self.__wg_location = self.__storage_policy.location
+
+        if memory_type is not None:
+            warnings.warn(
+                "The memory_type argument is deprecated. "
+                "Memory type is now automatically inferred."
+            )
+
+    def __make_wg_tensor(self, tensor, ix=None):
+        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank()
+        d = torch.tensor(tensor.dim(), device="cuda", dtype=torch.int64)
+
+        global_d = torch.empty((world_size,), device="cuda", dtype=torch.int64)
+        torch.distributed.all_gather_into_tensor(global_d, d)
+        if not (global_d[0] == global_d).all():
+            raise ValueError("Tensor dimension must be the same across ranks")
+
+        ld = torch.tensor(
+            0 if is_empty(tensor) else tensor.shape[0], device="cuda", dtype=torch.int64
+        )
+        sizes = torch.empty((world_size,), device="cuda", dtype=torch.int64)
+        torch.distributed.all_gather_into_tensor(sizes, ld)
+
+        dtypes = {}
+        dtype_ids = {}
+        for k, v in [
+            (torch.float32, 0),
+            (torch.float64, 1),
+            (torch.int32, 2),
+            (torch.int64, 3),
+            (torch.int16, 4),
+            (torch.float16, 5),
+            (torch.int8, 6),
+            (torch.bfloat16, 7),
+        ]:
+            dtypes[k] = v
+            dtype_ids[v] = k
+
+        def _encode_dtype(dtype: torch.dtype):
+            if dtype not in dtypes:
+                raise ValueError(f"Unsupported dtype: {dtype}")
+            return dtypes[dtype]
+
+        def _decode_dtype(dtype_id: int):
+            if dtype_id not in dtype_ids:
+                raise ValueError(f"Unsupported dtype id: {dtype_id}")
+            return dtype_ids[dtype_id]
+
+        dtype = torch.tensor(
+            _encode_dtype(tensor.dtype), device="cuda", dtype=torch.int64
+        )
+        global_dtype = torch.empty((world_size,), device="cuda", dtype=torch.int64)
+        torch.distributed.all_gather_into_tensor(global_dtype, dtype)
+        global_dtype = global_dtype[sizes > 0]
+        if len(global_dtype) == 0:
+            raise ValueError("Tensor is empty")
+        if (global_dtype[0] == global_dtype).all():
+            dtype = _decode_dtype(int(global_dtype[0]))
+        else:
+            raise ValueError("Tensor dtype must be the same across ranks")
+
+        if tensor.dim() == 1:
+            global_shape = [
+                sizes.sum(),
+            ]
+
+            tx = DistTensor(
+                None,
+                shape=global_shape,
+                dtype=dtype,
+                device=self.__wg_location,
+                backend=self.__storage_policy.backend,
+            )
+        elif tensor.dim() == 2:
+            td = torch.tensor(
+                -1 if is_empty(tensor) else tensor.shape[1],
+                device="cuda",
+                dtype=torch.int64,
+            )
+            global_td = torch.empty((world_size,), device="cuda", dtype=torch.int64)
+            torch.distributed.all_gather_into_tensor(global_td, td)
+            global_td = global_td[global_td > 0]
+
+            if len(global_td) == 0:
+                raise ValueError("Tensor is empty")
+
+            if (global_td[0] == global_td).all():
+                td = int(global_td[0])
+            else:
+                raise ValueError("Trailing dimensions must be the same across ranks")
+
+            global_shape = [int(sizes.sum()), td]
+            tx = DistEmbedding(
+                None,
+                shape=global_shape,
+                dtype=dtype,
+                device=self.__wg_location,
+                backend=self.__storage_policy.backend,
+            )
+
+            if is_empty(tensor):
+                tensor = tensor.reshape((-1, td))
+        else:
+            raise ValueError("Tensor must be 1D or 2D.")
+
+        if ix is None:
+            offset = sizes[:rank].sum() if rank > 0 else 0
+            ix = torch.arange(
+                offset, offset + tensor.shape[0], dtype=torch.int64, device="cuda"
+            ).contiguous()
+
+        if tensor.shape[0] != ix.shape[0]:
+            raise ValueError("Shape mismatch")
+        if ix.dim() != 1:
+            raise ValueError("Index must be 1D")
+
+        tx[ix] = tensor.cpu().clone(memory_format=torch.contiguous_format).pin_memory()
+        torch.cuda.synchronize()
+        torch.distributed.barrier()
+        return tx
+
+    def _put_tensor(
+        self,
+        tensor: "torch_geometric.typing.FeatureTensorType",
+        attr: "torch_geometric.data.feature_store.TensorAttr",
+    ) -> bool:
+        if attr.is_set("index") and attr.index is not None:
+            if (attr.group_name, attr.attr_name) not in self.__features:
+                self.__features[(attr.group_name, attr.attr_name)] = (
+                    self.__make_wg_tensor(tensor, ix=attr.index)
+                )
+        else:
+            self.__features[(attr.group_name, attr.attr_name)] = self.__make_wg_tensor(
+                tensor
+            )
+
+        return True
+
+    def _get_tensor(
+        self, attr: "torch_geometric.data.feature_store.TensorAttr"
+    ) -> Optional["torch_geometric.typing.FeatureTensorType"]:
+        if (attr.group_name, attr.attr_name) not in self.__features:
+            return None
+
+        emb = self.__features[attr.group_name, attr.attr_name]
+
+        if attr.is_set("index") and attr.index is not None:
+            return emb[attr.index]
+
+        return emb
+
+    def _remove_tensor(
+        self, attr: "torch_geometric.data.feature_store.TensorAttr"
+    ) -> bool:
+        if (attr.group_name, attr.attr_name) not in self.__features:
+            return False
+
+        del self.__features[attr.group_name, attr.attr_name]
+        return True
+
+    def _get_tensor_size(
+        self, attr: "torch_geometric.data.feature_store.TensorAttr"
+    ) -> Tuple:
+        return self.__features[attr.group_name, attr.attr_name].shape
+
+    def get_all_tensor_attrs(
+        self,
+    ) -> List["torch_geometric.data.feature_store.TensorAttr"]:
+        attrs = []
+        for group_name, attr_name in self.__features.keys():
+            attrs.append(
+                torch_geometric.data.feature_store.TensorAttr(
+                    group_name=group_name,
+                    attr_name=attr_name,
+                )
+            )
+
+        return attrs

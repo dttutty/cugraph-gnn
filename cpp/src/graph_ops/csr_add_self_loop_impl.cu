@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "csr_add_self_loop_func.cuh"
-#include <wholememory/wholememory.h>
+#include <wholegraph/wholegraph.h>
 
-#include "wholememory_ops/register.hpp"
+#include "wholegraph_tensor_ops/register.hpp"
 
 namespace graph_ops {
-wholememory_error_code_t csr_add_self_loop_impl(
+wholegraph_error_code_t csr_add_self_loop_impl(
   int* csr_row_ptr,
-  wholememory_array_description_t csr_row_ptr_array_desc,
+  wholegraph_array_description_t csr_row_ptr_array_desc,
   int* csr_col_ptr,
-  wholememory_array_description_t csr_col_ptr_array_desc,
+  wholegraph_array_description_t csr_col_ptr_array_desc,
   int* output_csr_row_ptr,
-  wholememory_array_description_t output_csr_row_ptr_array_desc,
+  wholegraph_array_description_t output_csr_row_ptr_array_desc,
   int* output_csr_col_ptr,
-  wholememory_array_description_t output_csr_col_ptr_array_desc,
+  wholegraph_array_description_t output_csr_col_ptr_array_desc,
   cudaStream_t stream)
 {
   try {
@@ -30,15 +30,15 @@ wholememory_error_code_t csr_add_self_loop_impl(
                            output_csr_col_ptr_array_desc,
                            stream);
 
-  } catch (const wholememory::cuda_error& rle) {
-    // WHOLEMEMORY_FAIL_NOTHROW("%s", rle.what());
-    return WHOLEMEMORY_LOGIC_ERROR;
-  } catch (const wholememory::logic_error& le) {
-    return WHOLEMEMORY_LOGIC_ERROR;
+  } catch (const wholegraph::cuda_error& rle) {
+    // WHOLEGRAPH_FAIL_NOTHROW("%s", rle.what());
+    return WHOLEGRAPH_LOGIC_ERROR;
+  } catch (const wholegraph::logic_error& le) {
+    return WHOLEGRAPH_LOGIC_ERROR;
   } catch (...) {
-    return WHOLEMEMORY_LOGIC_ERROR;
+    return WHOLEGRAPH_LOGIC_ERROR;
   }
-  return WHOLEMEMORY_SUCCESS;
+  return WHOLEGRAPH_SUCCESS;
 }
 
 }  // namespace graph_ops

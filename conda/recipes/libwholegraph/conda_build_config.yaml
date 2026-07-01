@@ -10,9 +10,6 @@ cuda_compiler:
 cmake_version:
   - ">=4.0"
 
-doxygen_version:
-  - ">=1.8.11"
-
 nccl_version:
   - ">=2.19"
 

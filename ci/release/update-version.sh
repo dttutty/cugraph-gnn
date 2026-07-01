@@ -17,10 +17,10 @@
 
 # Verify we're running from the repository root
 if [[ ! -f "VERSION" ]] || [[ ! -f "ci/release/update-version.sh" ]] || [[ ! -d "python" ]]; then
-    echo "Error: This script must be run from the root of the cugraph-gnn repository"
+    echo "Error: This script must be run from the root of the cugraph repository"
     echo ""
     echo "Usage:"
-    echo "  cd /path/to/cugraph-gnn"
+    echo "  cd /path/to/cugraph"
     echo "  ./ci/release/update-version.sh --run-context=main|release <new_version>"
     echo ""
     echo "Example:"
@@ -67,28 +67,14 @@ fi
 # Format is YY.MM.PP - no leading 'v' or trailing 'a'
 NEXT_FULL_TAG=$1
 
-if [[ -z "${NEXT_FULL_TAG}" ]]; then
-    echo "Error: Version argument is required"
-    echo ""
-    echo "Usage:"
-    echo "  ./ci/release/update-version.sh --run-context=main|release <new_version>"
-    echo ""
-    echo "Example:"
-    echo "  ./ci/release/update-version.sh --run-context=main 25.12.00"
-    exit 1
-fi
-
 # Get current version
 CURRENT_TAG=$(git tag --merged HEAD | grep -xE '^v.*' | sort --version-sort | tail -n 1 | tr -d 'v')
-CURRENT_MAJOR=$(echo $CURRENT_TAG | awk '{split($0, a, "."); print a[1]}')
-CURRENT_MINOR=$(echo $CURRENT_TAG | awk '{split($0, a, "."); print a[2]}')
-CURRENT_PATCH=$(echo $CURRENT_TAG | awk '{split($0, a, "."); print a[3]}')
-CURRENT_SHORT_TAG=${CURRENT_MAJOR}.${CURRENT_MINOR}
 
 #Get <major>.<minor> for next version
-NEXT_MAJOR=$(echo $NEXT_FULL_TAG | awk '{split($0, a, "."); print a[1]}')
-NEXT_MINOR=$(echo $NEXT_FULL_TAG | awk '{split($0, a, "."); print a[2]}')
+NEXT_MAJOR=$(echo "$NEXT_FULL_TAG" | awk '{split($0, a, "."); print a[1]}')
+NEXT_MINOR=$(echo "$NEXT_FULL_TAG" | awk '{split($0, a, "."); print a[2]}')
 NEXT_SHORT_TAG=${NEXT_MAJOR}.${NEXT_MINOR}
+NEXT_UCXX_SHORT_TAG="$(curl -sL https://version.gpuci.io/rapids/"${NEXT_SHORT_TAG}")"
 
 # Determine branch name based on context
 if [[ "${RUN_CONTEXT}" == "main" ]]; then
@@ -101,7 +87,7 @@ fi
 
 # Inplace sed replace; workaround for Linux and Mac
 function sed_runner() {
-    sed -i.bak ''"$1"'' $2 && rm -f ${2}.bak
+    sed -i.bak ''"$1"'' "$2" && rm -f "${2}".bak
 }
 
 # Centralized version file update
@@ -112,30 +98,51 @@ echo "${RAPIDS_BRANCH_NAME}" > RAPIDS_BRANCH
 
 # Need to distutils-normalize the original version
 NEXT_SHORT_TAG_PEP440=$(python -c "from packaging.version import Version; print(Version('${NEXT_SHORT_TAG}'))")
+NEXT_UCXX_SHORT_TAG_PEP440=$(python -c "from packaging.version import Version; print(Version('${NEXT_UCXX_SHORT_TAG}'))")
 
 DEPENDENCIES=(
-  cudf
-  cugraph
   cugraph-pyg
-  cuml
-  dask-cuda
+  cudf
+  cuxfilter
   libcudf
   libraft
-  libraft-headers
-  librmm
   libwholegraph
-  libwholegraph-tests
+  librmm
+  pylibcudf
   pylibcugraph
   pylibwholegraph
+  pylibraft
+  pyraft
+  raft-dask
   rmm
+  rapids-dask-dependency
+  wholegraph-torch
 )
-for DEP in "${DEPENDENCIES[@]}"; do
-  for FILE in dependencies.yaml conda/environments/*.yaml python/cugraph-pyg/conda/*.yaml; do
-    sed_runner "/-.* ${DEP}\(-cu[[:digit:]]\{2\}\)\{0,1\}==/ s/==.*/==${NEXT_SHORT_TAG_PEP440}.*,>=0.0.0a0/g" "${FILE}"
+UCXX_DEPENDENCIES=(
+  libucxx
+  ucxx
+)
+for FILE in dependencies.yaml conda/environments/*.yaml; do
+  for DEP in "${DEPENDENCIES[@]}"; do
+    sed_runner "/-.* ${DEP}\(-cu[[:digit:]]\{2\}\)\{0,1\}\(\[.*\]\)\{0,1\}==/ s/==.*/==${NEXT_SHORT_TAG_PEP440}.*,>=0.0.0a0/g" "${FILE}"
   done
-  for FILE in python/**/pyproject.toml; do
+  for DEP in "${UCXX_DEPENDENCIES[@]}"; do
+    sed_runner "/-.* ${DEP}\(-cu[[:digit:]]\{2\}\)\{0,1\}==/ s/==.*/==${NEXT_UCXX_SHORT_TAG_PEP440}.*,>=0.0.0a0/g" "${FILE}"
+  done
+done
+for FILE in python/*/pyproject.toml; do
+  for DEP in "${DEPENDENCIES[@]}"; do
     sed_runner "/\"${DEP}\(-cu[[:digit:]]\{2\}\)\{0,1\}==/ s/==.*\"/==${NEXT_SHORT_TAG_PEP440}.*,>=0.0.0a0\"/g" "${FILE}"
   done
+  for DEP in "${UCXX_DEPENDENCIES[@]}"; do
+    sed_runner "/\"${DEP}\(-cu[[:digit:]]\{2\}\)\{0,1\}==/ s/==.*\"/==${NEXT_UCXX_SHORT_TAG_PEP440}.*,>=0.0.0a0\"/g" "${FILE}"
+  done
+done
+
+# ucxx version
+for FILE in conda/recipes/*/conda_build_config.yaml; do
+  sed_runner "/^libucxx_version:\$/ {n;s|.*|  - \"${NEXT_UCXX_SHORT_TAG_PEP440}.*\"|;}" "${FILE}"
+  sed_runner "/^ucxx_version:\$/ {n;s|.*|  - \"${NEXT_UCXX_SHORT_TAG_PEP440}.*\"|;}" "${FILE}"
 done
 
 # CI files - context-aware branch references
@@ -144,19 +151,13 @@ for FILE in .github/workflows/*.yaml; do
   sed_runner "s/:[0-9]*\\.[0-9]*-/:${NEXT_SHORT_TAG}-/g" "${FILE}"
 done
 
-# Documentation references - context-aware
-if [[ "${RUN_CONTEXT}" == "main" ]]; then
-  # In main context, keep external documentation on main (no changes needed)
-  echo "Keeping external documentation references on main branch"
-elif [[ "${RUN_CONTEXT}" == "release" ]]; then
-  # In release context, use release branch for external documentation links (word boundaries to avoid partial matches)
-  sed_runner "s|\\bmain\\b|release/${NEXT_SHORT_TAG}|g" cpp/scripts/run-cmake-format.sh
-fi
-
 # .devcontainer files
-find .devcontainer/ -type f -name devcontainer.json -print0 | while IFS= read -r -d '' filename; do
+if [[ -d .devcontainer ]]; then
+  find .devcontainer/ -type f -name devcontainer.json -print0 | while IFS= read -r -d '' filename; do
     sed_runner "s@rapidsai/devcontainers:[0-9.]*@rapidsai/devcontainers:${NEXT_SHORT_TAG}@g" "${filename}"
+    sed_runner "s@rapidsai/devcontainers/features/ucx:[0-9.]*@rapidsai/devcontainers/features/ucx:${NEXT_SHORT_TAG_PEP440}@" "${filename}"
     sed_runner "s@rapidsai/devcontainers/features/cuda:[0-9.]*@rapidsai/devcontainers/features/cuda:${NEXT_SHORT_TAG_PEP440}@" "${filename}"
     sed_runner "s@rapidsai/devcontainers/features/rapids-build-utils:[0-9.]*@rapidsai/devcontainers/features/rapids-build-utils:${NEXT_SHORT_TAG_PEP440}@" "${filename}"
     sed_runner "s@rapids-\${localWorkspaceFolderBasename}-[0-9.]*@rapids-\${localWorkspaceFolderBasename}-${NEXT_SHORT_TAG}@g" "${filename}"
-done
+  done
+fi

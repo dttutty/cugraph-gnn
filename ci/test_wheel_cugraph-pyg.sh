@@ -8,10 +8,11 @@ source rapids-init-pip
 
 RAPIDS_PY_CUDA_SUFFIX="$(rapids-wheel-ctk-name-gen "${RAPIDS_CUDA_VERSION}")"
 
-# Download the libwholegraph, pylibwholegraph, and cugraph-pyg built in the previous step
-LIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libwholegraph cugraph-gnn --cuda "$RAPIDS_CUDA_VERSION")")
-PYLIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python pylibwholegraph cugraph-gnn --stable --cuda "$RAPIDS_CUDA_VERSION")")
-CUGRAPH_PYG_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python cugraph-pyg cugraph-gnn --pure --arch any --cuda "$RAPIDS_CUDA_VERSION")")
+# Download the libwholegraph, pylibwholegraph, wholegraph-torch, and cugraph-pyg wheels
+LIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libwholegraph cugraph --cuda "$RAPIDS_CUDA_VERSION")")
+PYLIBWHOLEGRAPH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python pylibwholegraph cugraph --stable --cuda "$RAPIDS_CUDA_VERSION")")
+WHOLEGRAPH_TORCH_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python wholegraph-torch cugraph --pure --arch any --cuda "$RAPIDS_CUDA_VERSION")")
+CUGRAPH_PYG_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python cugraph-pyg cugraph --pure --arch any --cuda "$RAPIDS_CUDA_VERSION")")
 
 # generate constraints (possibly pinning to oldest support versions of dependencies)
 rapids-generate-pip-constraints test_cugraph_pyg "${PIP_CONSTRAINT}"
@@ -22,6 +23,7 @@ PIP_INSTALL_ARGS=(
   --extra-index-url 'https://pypi.nvidia.com'
   "${LIBWHOLEGRAPH_WHEELHOUSE}"/*.whl
   "$(echo "${PYLIBWHOLEGRAPH_WHEELHOUSE}"/pylibwholegraph_"${RAPIDS_PY_CUDA_SUFFIX}"*.whl)"
+  "$(echo "${WHOLEGRAPH_TORCH_WHEELHOUSE}"/wholegraph_torch_"${RAPIDS_PY_CUDA_SUFFIX}"*.whl)"
   "$(echo "${CUGRAPH_PYG_WHEELHOUSE}"/cugraph_pyg_"${RAPIDS_PY_CUDA_SUFFIX}"*.whl)[test]"
 )
 
@@ -60,20 +62,10 @@ fi
 rapids-pip-retry install \
   "${PIP_INSTALL_ARGS[@]}"
 
-# RAPIDS_DATASET_ROOT_DIR is used by test scripts
-export RAPIDS_DATASET_ROOT_DIR="$(realpath datasets)"
-
 # Enable legacy behavior of torch.load for examples relying on ogb
 export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
 
 if [[ "${torch_downloaded}" == "true" ]]; then
-
-  # only need to download datasets if 'torch' is installed, otherwise all the
-  # tests using them are skipped
-  mkdir -p "${RAPIDS_DATASET_ROOT_DIR}"
-  pushd "${RAPIDS_DATASET_ROOT_DIR}"
-  ./get_test_data.sh --test
-  popd
 
   # 'torch' is an optional dependency of 'cugraph-pyg'... confirm that it's actually
   # installed here and that we've installed a package with CUDA support.

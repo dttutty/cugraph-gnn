@@ -1,4 +1,5 @@
 name: build
+
 on:
   push:
     branches:
@@ -9,29 +10,30 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: |
-          branch: git branch the workflow run targets.
-          Required even when 'sha' is provided because it is also used for organizing artifacts.
+        description: "Branch used for organizing artifacts."
         required: true
         type: string
       date:
-        description: "date: Date (YYYY-MM-DD) this run is for. Used to organize artifacts produced by nightly builds"
+        description: "Date (YYYY-MM-DD) used for organizing artifacts."
         required: true
         type: string
       sha:
-        description: "sha: full git commit SHA to check out"
+        description: "Full git commit SHA to check out."
         required: true
         type: string
       build_type:
-        description: "build_type: one of [branch, nightly, pull-request]"
+        description: "One of [branch, nightly, pull-request]."
         type: string
         default: nightly
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
+
 permissions: {}
+
 jobs:
-  cpp-build:
+  conda-cpp-build:
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@main
     with:
@@ -47,8 +49,9 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-  python-build:
-    needs: [cpp-build]
+
+  conda-python-build:
+    needs: conda-cpp-build
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
     with:
@@ -57,7 +60,6 @@ jobs:
       date: ${{ inputs.date }}
       script: ci/build_python.sh
       sha: ${{ inputs.sha }}
-      # Build a conda package for each CUDA x ARCH x minimum supported Python version
       matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
     permissions:
       actions: read
@@ -65,8 +67,32 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-  python-build-noarch:
-    needs: [cpp-build, python-build]
+
+  conda-python-build-wholegraph-torch:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      script: ci/build_python_wholegraph-torch.sh
+      sha: ${{ inputs.sha }}
+      pure-conda: true
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+
+  conda-python-build-cugraph-pyg:
+    needs:
+      - conda-cpp-build
+      - conda-python-build
+      - conda-python-build-wholegraph-torch
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
     with:
@@ -82,95 +108,19 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-  docs-build:
-    needs: cpp-build
-    secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@main
-    with:
-      arch: "amd64"
-      branch: ${{ inputs.branch }}
-      build_type: ${{ inputs.build_type || 'branch' }}
-      container_image: "rapidsai/ci-conda:26.08-latest"
-      date: ${{ inputs.date }}
-      script: "ci/build_docs.sh"
-      sha: ${{ inputs.sha }}
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
-  upload-conda:
-    needs: [cpp-build, python-build, python-build-noarch]
-    secrets:
-      CONDA_RAPIDSAI_NIGHTLY_TOKEN: ${{ secrets.CONDA_RAPIDSAI_NIGHTLY_TOKEN }}
-      CONDA_RAPIDSAI_TOKEN: ${{ secrets.CONDA_RAPIDSAI_TOKEN }}
-    uses: rapidsai/shared-workflows/.github/workflows/conda-upload-packages.yaml@main
-    with:
-      build_type: ${{ inputs.build_type || 'branch' }}
-      branch: ${{ inputs.branch }}
-      date: ${{ inputs.date }}
-      sha: ${{ inputs.sha }}
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
-  wheel-build-cugraph-pyg:
-    secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
-    with:
-      # This selects "ARCH=amd64 + the latest supported Python + CUDA".
-      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
-      build_type: ${{ inputs.build_type || 'branch' }}
-      branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
-      date: ${{ inputs.date }}
-      node_type: cpu4
-      script: ci/build_wheel_cugraph-pyg.sh
-      package-name: cugraph-pyg
-      package-type: python
-      pure-wheel: true
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
-  wheel-publish-cugraph-pyg:
-    needs: wheel-build-cugraph-pyg
-    secrets:
-      CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN: ${{ secrets.CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN }}
-      RAPIDSAI_PYPI_TOKEN: ${{ secrets.RAPIDSAI_PYPI_TOKEN }}
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-publish.yaml@main
-    with:
-      build_type: ${{ inputs.build_type || 'branch' }}
-      branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
-      date: ${{ inputs.date }}
-      package-name: cugraph-pyg
-      package-type: python
-      publish-wheel-search-key: cugraph-gnn_wheel_python_cugraph-pyg
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
+
   wheel-build-libwholegraph:
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       build_type: ${{ inputs.build_type || 'branch' }}
       branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
       date: ${{ inputs.date }}
       node_type: cpu8
-      script: ci/build_wheel_libwholegraph.sh
       package-name: libwholegraph
       package-type: cpp
-      # build for every combination of arch and CUDA version, but only for the latest Python
+      script: ci/build_wheel_libwholegraph.sh
+      sha: ${{ inputs.sha }}
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
     permissions:
       actions: read
@@ -178,6 +128,7 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
+
   wheel-build-pylibwholegraph:
     needs: wheel-build-libwholegraph
     secrets: inherit # zizmor: ignore[secrets-inherit]
@@ -185,13 +136,12 @@ jobs:
     with:
       build_type: ${{ inputs.build_type || 'branch' }}
       branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
       date: ${{ inputs.date }}
       node_type: cpu8
-      script: ci/build_wheel_pylibwholegraph.sh
       package-name: pylibwholegraph
       package-type: python
-      # Build a wheel for each CUDA x ARCH x minimum supported Python version
+      script: ci/build_wheel_pylibwholegraph.sh
+      sha: ${{ inputs.sha }}
       matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
     permissions:
       actions: read
@@ -199,52 +149,47 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-  wheel-publish-libwholegraph:
-    needs: wheel-build-libwholegraph
-    secrets:
-      CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN: ${{ secrets.CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN }}
-      RAPIDSAI_PYPI_TOKEN: ${{ secrets.RAPIDSAI_PYPI_TOKEN }}
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-publish.yaml@main
-    with:
-      build_type: ${{ inputs.build_type || 'branch' }}
-      branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
-      date: ${{ inputs.date }}
-      package-name: libwholegraph
-      package-type: cpp
-      publish-wheel-search-key: cugraph-gnn_wheel_cpp_libwholegraph
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
-  wheel-publish-pylibwholegraph:
+
+  wheel-build-wholegraph-torch:
     needs: wheel-build-pylibwholegraph
-    secrets:
-      CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN: ${{ secrets.CONDA_RAPIDSAI_WHEELS_NIGHTLY_TOKEN }}
-      RAPIDSAI_PYPI_TOKEN: ${{ secrets.RAPIDSAI_PYPI_TOKEN }}
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-publish.yaml@main
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       build_type: ${{ inputs.build_type || 'branch' }}
       branch: ${{ inputs.branch }}
-      sha: ${{ inputs.sha }}
       date: ${{ inputs.date }}
-      package-name: pylibwholegraph
+      node_type: cpu4
+      package-name: wholegraph-torch
       package-type: python
-      publish-wheel-search-key: cugraph-gnn_wheel_python_pylibwholegraph
+      pure-wheel: true
+      script: ci/build_wheel_wholegraph-torch.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
     permissions:
       actions: read
       contents: read
       id-token: write
       packages: read
       pull-requests: read
-  devcontainers:
-    name: Build devcontainers
-    secrets: inherit  # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/build-devcontainers.yaml@main
-    permissions:
-      packages: write
+
+  wheel-build-cugraph-pyg:
+    needs: wheel-build-wholegraph-torch
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
-      push: true
-      cuda: '["12.9", "13.3"]'
+      build_type: ${{ inputs.build_type || 'branch' }}
+      branch: ${{ inputs.branch }}
+      date: ${{ inputs.date }}
+      node_type: cpu4
+      package-name: cugraph-pyg
+      package-type: python
+      pure-wheel: true
+      script: ci/build_wheel_cugraph-pyg.sh
+      sha: ${{ inputs.sha }}
+      matrix_filter: map(select(.ARCH == "amd64")) | group_by(.CUDA_VER|split(".")|map(tonumber)|.[0]) | map(max_by([(.PY_VER|split(".")|map(tonumber)), (.CUDA_VER|split(".")|map(tonumber))]))
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read

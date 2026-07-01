@@ -4,12 +4,12 @@
  */
 #include "wholegraph_benchmark.hpp"
 
-#include "wholememory/communicator.hpp"
+#include "wholegraph/communicator.hpp"
 #include <cstdint>
 #include <experimental/functional>
 #include <experimental/random>
-#include <wholememory/tensor_description.h>
-#include <wholememory/wholememory.h>
+#include <wholegraph/tensor_description.h>
+#include <wholegraph/wholegraph.h>
 
 #include <functional>
 #include <string>
@@ -19,7 +19,7 @@ namespace wholegraph::bench {
 
 template <typename IndexT>
 void host_get_random_integer_indices(void* indices,
-                                     wholememory_array_description_t indice_desc,
+                                     wholegraph_array_description_t indice_desc,
                                      int64_t max_indices)
 {
   IndexT* indices_ptr = static_cast<IndexT*>(indices);
@@ -31,10 +31,10 @@ void host_get_random_integer_indices(void* indices,
 }
 
 void host_random_init_integer_indices(void* indices,
-                                      wholememory_array_description_t indices_desc,
+                                      wholegraph_array_description_t indices_desc,
                                       int64_t max_indices)
 {
-  if (indices_desc.dtype == WHOLEMEMORY_DT_INT) {
+  if (indices_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_random_integer_indices<int>(indices, indices_desc, max_indices);
   } else {
     host_get_random_integer_indices<int64_t>(indices, indices_desc, max_indices);
@@ -59,7 +59,7 @@ void host_random_partition(size_t* partition_sizes, size_t total_size, int parti
 }
 
 void MultiProcessMeasurePerformance(std::function<void()> run_fn,
-                                    wholememory_comm_t& wm_comm,
+                                    wholegraph_comm_t& wg_comm,
                                     const PerformanceMeter& meter,
                                     const std::function<void()>& barrier_fn)
 {
@@ -74,9 +74,9 @@ void MultiProcessMeasurePerformance(std::function<void()> run_fn,
     int64_t time_warmup = TIME_DIFF_US(tv_warmup_s, tv_warmup_c);
     if (time_warmup >= target_warmup_time) break;
     run_fn();
-    WHOLEMEMORY_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
+    WHOLEGRAPH_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
   }
-  WHOLEMEMORY_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
+  WHOLEGRAPH_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
   barrier_fn();
 
   // run
@@ -91,9 +91,9 @@ void MultiProcessMeasurePerformance(std::function<void()> run_fn,
     gettimeofday(&tv_run_c, nullptr);
     int64_t time_run_used = TIME_DIFF_US(tv_run_s, tv_run_c);
     if (time_run_used >= max_run_us || real_run_count >= meter.run_count) break;
-    if (meter.sync) { WHOLEMEMORY_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess); }
+    if (meter.sync) { WHOLEGRAPH_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess); }
   }
-  WHOLEMEMORY_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
+  WHOLEGRAPH_CHECK_NOTHROW(cudaDeviceSynchronize() == cudaSuccess);
   gettimeofday(&tv_run_e, nullptr);
   int64_t real_time_used_us = TIME_DIFF_US(tv_run_s, tv_run_e);
   double single_run_time_us = real_time_used_us;
@@ -110,18 +110,18 @@ void MultiProcessMeasurePerformance(std::function<void()> run_fn,
       metric_value *= 1e6;
     }
 
-    std::vector<double> recv_vec(wm_comm->world_size);
-    wm_comm->host_allgather(&metric_value, recv_vec.data(), 1, WHOLEMEMORY_DT_DOUBLE);
+    std::vector<double> recv_vec(wg_comm->world_size);
+    wg_comm->host_allgather(&metric_value, recv_vec.data(), 1, WHOLEGRAPH_DT_DOUBLE);
     double min_metric, max_metric, avg_metric;
     min_metric = max_metric = recv_vec[0];
     avg_metric              = 0.0;
-    for (int j = 0; j < wm_comm->world_size; j++) {
+    for (int j = 0; j < wg_comm->world_size; j++) {
       min_metric = std::min(min_metric, recv_vec[j]);
       max_metric = std::max(max_metric, recv_vec[j]);
       avg_metric += recv_vec[j];
     }
-    avg_metric /= wm_comm->world_size;
-    if (wm_comm->world_rank == 0) {
+    avg_metric /= wg_comm->world_size;
+    if (wg_comm->world_rank == 0) {
       fprintf(stderr,
               "== Metric: %20s:  min=%.2lf %s,, max=%.2lf %s,, avg=%.2lf %s\n",
               meter.metrics_[i].name.c_str(),

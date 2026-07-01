@@ -17,10 +17,6 @@ function(ConfigureTestInternal TEST_NAME)
     ${TEST_NAME} PRIVATE GTest::gmock GTest::gtest GTest::gmock_main GTest::gtest_main wholegraph
                          raft::raft rmm::rmm pthread
   )
-  if(BUILD_WITH_NVSHMEM)
-    target_compile_definitions(${TEST_NAME} PRIVATE WITH_NVSHMEM_SUPPORT)
-  endif()
-
   set_target_properties(
     ${TEST_NAME}
     PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -98,25 +94,25 @@ endfunction()
 # parallel_utils tests
 ConfigureTest(PARALLEL_UTILS_TEST parallel_utils_tests.cpp)
 
-# wholememory communicator tests
-ConfigureTest(WHOLEMEMORY_COMM_TEST wholememory/wholememory_comm_tests.cpp)
+# wholegraph communicator tests
+ConfigureTest(WHOLEGRAPH_COMM_TEST wholegraph/wholegraph_comm_tests.cpp)
 
-# wholememory handle tests
-ConfigureTest(WHOLEMEMORY_HANDLE_TEST wholememory/wholememory_handle_tests.cpp)
+# wholegraph handle tests
+ConfigureTest(WHOLEGRAPH_HANDLE_TEST wholegraph/wholegraph_handle_tests.cpp)
 
-# wholememory tensor tests
-ConfigureTest(WHOLEMEMORY_TENSOR_TEST wholememory/wholememory_tensor_tests.cpp)
+# wholegraph tensor tests
+ConfigureTest(WHOLEGRAPH_TENSOR_TEST wholegraph/wholegraph_tensor_tests.cpp)
 
-# wholememory gather op tests
+# wholegraph gather op tests
 ConfigureTest(
-  WHOLEMEMORY_GATHER_TEST wholememory_ops/wholememory_gather_tests.cu
-  wholememory_ops/embedding_test_utils.cu
+  WHOLEGRAPH_GATHER_TEST wholegraph_tensor_ops/wholegraph_gather_tests.cu
+  wholegraph_tensor_ops/embedding_test_utils.cu
 )
 
-# wholememory scatter op tests
+# wholegraph scatter op tests
 ConfigureTest(
-  WHOLEMEMORY_SCATTER_TEST wholememory_ops/wholememory_scatter_tests.cu
-  wholememory_ops/embedding_test_utils.cu
+  WHOLEGRAPH_SCATTER_TEST wholegraph_tensor_ops/wholegraph_scatter_tests.cu
+  wholegraph_tensor_ops/embedding_test_utils.cu
 )
 
 # wholegraph unweighted samping op tests
@@ -134,19 +130,19 @@ ConfigureTest(
 )
 
 # wholegraph cache set tests
-ConfigureTest(WHOLEGRAPH_CACHESET_TEST wholememory_ops/cacheset_tests.cu)
+ConfigureTest(WHOLEGRAPH_CACHESET_TEST wholegraph_tensor_ops/cacheset_tests.cu)
 
 # wholegraph embedding tests
 ConfigureTest(
-  WHOLEGRAPH_EMBEDDING_TEST wholememory_ops/wholememory_embedding_tests.cu
-  wholememory_ops/embedding_test_utils.cu
+  WHOLEGRAPH_EMBEDDING_TEST wholegraph_tensor_ops/wholegraph_embedding_tests.cu
+  wholegraph_tensor_ops/embedding_test_utils.cu
 )
 
 # wholegraph embedding gradient apply tests
 ConfigureTest(
   WHOLEGRAPH_EMBEDDING_GRADIENT_APPLY_TEST
-  wholememory_ops/wholememory_embedding_gradient_apply_tests.cu
-  wholememory_ops/embedding_test_utils.cu
+  wholegraph_tensor_ops/wholegraph_embedding_gradient_apply_tests.cu
+  wholegraph_tensor_ops/embedding_test_utils.cu
 )
 
 # graph append unique op tests

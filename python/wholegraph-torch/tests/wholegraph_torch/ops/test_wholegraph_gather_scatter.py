@@ -1,0 +1,185 @@
+# SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+import pytest
+import pylibwholegraph.binding.wholegraph_binding as wgb
+from pylibwholegraph.utils.multiprocess import multiprocess_run
+from wholegraph_torch.initialize import (
+    finalize as finalize_wg_torch,
+    init_torch_env_and_create_wg_comm,
+)
+from wholegraph_torch.dlpack_utils import torch_import_from_dlpack
+from test_utils.test_comm import random_partition
+import wholegraph_torch.wholegraph_tensor_ops as wg_ops
+
+# PYTHONPATH=../:$PYTHONPATH python3 -m pytest \
+# ../tests/wholegraph_torch/ops/test_wholegraph_gather_scatter.py -s
+
+
+def gen_int_embedding(indice_tensor, embedding_dim, output_type):
+    torch = pytest.importorskip("torch")
+    if embedding_dim == 0:
+        embedding_dim = 1  # unsqueeze 2D for input (2D is required for scatter op)
+    indice_count = indice_tensor.shape[0]
+    indice_part = (
+        indice_tensor.type(torch.int).reshape(indice_count, 1).repeat(1, embedding_dim)
+    )
+    embedding_part = (
+        torch.arange(0, embedding_dim, 1, dtype=torch.int)
+        .reshape(1, embedding_dim)
+        .repeat(indice_count, 1)
+    )
+    output = indice_part + embedding_part
+    return output.type(output_type)
+
+
+def scatter_gather_test_cast(
+    wg_comm,
+    dt,
+    mt,
+    ml,
+    embedding_count,
+    embedding_dim,
+    indice_count,
+    use_python_binding=True,
+    entry_partition=None,
+):
+    torch = pytest.importorskip("torch")
+    world_rank = wg_comm.get_rank()
+    world_size = wg_comm.get_size()
+    print(
+        f"Rank={world_rank} testing scatter gather with "
+        f"embedding_count={embedding_count}, "
+        f"embedding_dim={embedding_dim}, "
+        f"indice_count={indice_count}, dt={dt}, mt={mt}, ml={ml}"
+    )
+    if embedding_dim == 0:
+        wg_embedding = wgb.create_wholegraph_array(
+            dt, embedding_count, wg_comm, mt, ml, entry_partition
+        )
+    else:
+        wg_embedding = wgb.create_wholegraph_matrix(
+            dt, embedding_count, embedding_dim, -1, wg_comm, mt, ml, entry_partition
+        )
+
+    scatter_indice = torch.arange(
+        world_rank, embedding_count, world_size, dtype=torch.int64
+    )
+
+    embedding_to_scatter = gen_int_embedding(scatter_indice, embedding_dim, torch.float)
+
+    scatter_indice_cuda = scatter_indice.cuda()
+    embedding_to_scatter_cuda = embedding_to_scatter.cuda()
+
+    if use_python_binding:
+        wg_ops.wholegraph_scatter_functor(
+            embedding_to_scatter_cuda, scatter_indice_cuda, wg_embedding
+        )
+    else:
+        torch.ops.wholegraph.scatter(
+            embedding_to_scatter_cuda, scatter_indice_cuda, wg_embedding.get_c_handle()
+        )
+
+    torch.cuda.synchronize()
+    wg_comm.barrier()
+
+    del scatter_indice
+    del scatter_indice_cuda
+    del embedding_to_scatter
+    del embedding_to_scatter_cuda
+
+    local_tensor_cuda, local_start = wg_embedding.get_local_tensor(
+        torch_import_from_dlpack, wgb.WholeGraphMemoryLocation.MlDevice, world_rank
+    )
+
+    local_ref_start = wg_embedding.get_local_entry_start()
+    local_ref_count = wg_embedding.get_local_entry_count()
+    assert local_start == local_ref_start
+    assert local_tensor_cuda.dim() == 2 if embedding_dim > 0 else 1
+    assert local_tensor_cuda.shape[0] == local_ref_count
+    if local_tensor_cuda.dim() == 2:
+        assert local_tensor_cuda.shape[1] == embedding_dim
+    else:
+        # unsqueeze to 2D for comparison
+        local_tensor_cuda = local_tensor_cuda.unsqueeze(1)
+
+    local_tensor = local_tensor_cuda.cpu()
+    local_indices = torch.arange(
+        local_ref_start, local_ref_start + local_ref_count, dtype=torch.int64
+    )
+    local_tensor_ref = gen_int_embedding(local_indices, embedding_dim, torch.float)
+    # print('\nlocal_tensor %s =%s\nlocal_tensor_ref %s =%s' % (
+    #    local_tensor.shape, local_tensor, local_tensor_ref.shape, local_tensor_ref))
+    assert torch.allclose(local_tensor, local_tensor_ref)
+
+    gather_indice = torch.randint(0, embedding_count, (indice_count,), dtype=torch.int)
+    gather_indice_cuda = gather_indice.cuda()
+    if use_python_binding:
+        embedding_after_gather_cuda = wg_ops.wholegraph_gather_forward_functor(
+            wg_embedding, gather_indice_cuda
+        )
+    else:
+        embedding_after_gather_cuda = torch.ops.wholegraph.gather(
+            wg_embedding.get_c_handle(), gather_indice_cuda, None, None
+        )
+    embedding_after_gather = embedding_after_gather_cuda.cpu()
+    ref_embedding_gather = gen_int_embedding(gather_indice, embedding_dim, torch.float)
+    if embedding_after_gather.dim() == 1:
+        # unsqueeze to 2D for comparison
+        embedding_after_gather = embedding_after_gather.unsqueeze(1)
+    # print('\ngather_indice=%s\nembedding_after_gather=%s\nref_embedding_gather=%s' % (
+    #    gather_indice, embedding_after_gather, ref_embedding_gather))
+    assert torch.allclose(embedding_after_gather, ref_embedding_gather)
+
+    del gather_indice
+    del gather_indice_cuda
+    del embedding_after_gather
+    del embedding_after_gather_cuda
+    del ref_embedding_gather
+
+    wgb.destroy_wholegraph_tensor(wg_embedding)
+
+
+def routine_func(world_rank: int, world_size: int):
+    wg_comm, _ = init_torch_env_and_create_wg_comm(
+        world_rank, world_size, world_rank, world_size
+    )
+    wg_comm = wg_comm.wgb_comm
+
+    embedding_count = 1024 * 256 * world_size + 3
+    indice_count = 100001
+    dt = wgb.WholeGraphDataType.DtFloat
+    entry_partition = random_partition(embedding_count, world_size)
+
+    print("")
+
+    try:
+        for mt in [
+            wgb.WholeGraphMemoryType.MtContinuous,
+            wgb.WholeGraphMemoryType.MtDistributed,
+        ]:
+            for ml in [
+                wgb.WholeGraphMemoryLocation.MlHost,
+                wgb.WholeGraphMemoryLocation.MlDevice,
+            ]:
+                for embedding_dim in [0, 256]:  # 0 is for 1D tensor
+                    if wg_comm.support_type_location(mt, ml):
+                        scatter_gather_test_cast(
+                            wg_comm,
+                            dt,
+                            mt,
+                            ml,
+                            embedding_count,
+                            embedding_dim,
+                            indice_count,
+                            True,
+                            entry_partition,
+                        )
+    finally:
+        finalize_wg_torch()
+
+
+def test_wholegraph_gather_scatter(torch):
+    gpu_count = wgb.fork_get_gpu_count()
+    assert gpu_count > 0
+    multiprocess_run(gpu_count, routine_func)

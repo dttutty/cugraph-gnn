@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <wholememory/tensor_description.h>
+#include <wholegraph/tensor_description.h>
 
 namespace graph_ops {
 namespace testing {
@@ -37,14 +37,14 @@ void host_get_random_node_ids(void* nodes, int64_t node_count, int64_t range, bo
 }
 
 void gen_node_ids(void* host_target_nodes_ptr,
-                  wholememory_array_description_t node_desc,
+                  wholegraph_array_description_t node_desc,
                   int64_t range,
                   bool unique)
 {
   int64_t node_count = node_desc.size;
-  if (node_desc.dtype == WHOLEMEMORY_DT_INT) {
+  if (node_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_random_node_ids<int>(host_target_nodes_ptr, node_count, range, unique);
-  } else if (node_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  } else if (node_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_random_node_ids<int64_t>(host_target_nodes_ptr, node_count, range, unique);
   }
 }
@@ -78,9 +78,9 @@ void insert_nodes_to_append_unique_hash_table(
 
 template <typename DataType>
 void host_get_append_unique(void* target_nodes_ptr,
-                            wholememory_array_description_t target_nodes_desc,
+                            wholegraph_array_description_t target_nodes_desc,
                             void* neighbor_nodes_ptr,
-                            wholememory_array_description_t neighbor_nodes_desc,
+                            wholegraph_array_description_t neighbor_nodes_desc,
                             int* host_total_unique_count,
                             void** host_output_unique_nodes_ptr)
 {
@@ -109,22 +109,22 @@ void host_get_append_unique(void* target_nodes_ptr,
 }
 
 void host_append_unique(void* target_nodes_ptr,
-                        wholememory_array_description_t target_nodes_desc,
+                        wholegraph_array_description_t target_nodes_desc,
                         void* neighbor_nodes_ptr,
-                        wholememory_array_description_t neighbor_nodes_desc,
+                        wholegraph_array_description_t neighbor_nodes_desc,
                         int* host_total_unique_count,
                         void** host_output_unique_nodes_ptr)
 {
   EXPECT_EQ(target_nodes_desc.dtype, neighbor_nodes_desc.dtype);
 
-  if (target_nodes_desc.dtype == WHOLEMEMORY_DT_INT) {
+  if (target_nodes_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_append_unique<int>(target_nodes_ptr,
                                 target_nodes_desc,
                                 neighbor_nodes_ptr,
                                 neighbor_nodes_desc,
                                 host_total_unique_count,
                                 host_output_unique_nodes_ptr);
-  } else if (target_nodes_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  } else if (target_nodes_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_append_unique<int64_t>(target_nodes_ptr,
                                     target_nodes_desc,
                                     neighbor_nodes_ptr,
@@ -137,11 +137,11 @@ void host_append_unique(void* target_nodes_ptr,
 template <typename DataType>
 void host_get_append_unique_neighbor_raw_to_unique(
   void* host_output_unique_nodes_ptr,
-  wholememory_array_description_t output_unique_nodes_desc,
+  wholegraph_array_description_t output_unique_nodes_desc,
   void* host_neighbor_nodes_ptr,
-  wholememory_array_description_t neighbor_node_desc,
+  wholegraph_array_description_t neighbor_node_desc,
   void** host_output_neighbor_raw_to_unique_mapping_ptr,
-  wholememory_array_description_t output_neighbor_raw_to_unique_mapping_desc)
+  wholegraph_array_description_t output_neighbor_raw_to_unique_mapping_desc)
 {
   DataType* output_unique_nodes_ptr = static_cast<DataType*>(host_output_unique_nodes_ptr);
   DataType* neighbor_nodes_ptr      = static_cast<DataType*>(host_neighbor_nodes_ptr);
@@ -158,19 +158,19 @@ void host_get_append_unique_neighbor_raw_to_unique(
 
 void host_gen_append_unique_neighbor_raw_to_unique(
   void* host_output_unique_nodes_ptr,
-  wholememory_array_description_t output_unique_nodes_desc,
+  wholegraph_array_description_t output_unique_nodes_desc,
   void* host_neighbor_nodes_ptr,
-  wholememory_array_description_t neighbor_nodes_desc,
+  wholegraph_array_description_t neighbor_nodes_desc,
   void** host_output_neighbor_raw_to_unique_mapping_ptr,
-  wholememory_array_description_t output_neighbor_raw_to_unique_mapping_desc)
+  wholegraph_array_description_t output_neighbor_raw_to_unique_mapping_desc)
 {
   EXPECT_EQ(output_unique_nodes_desc.dtype, neighbor_nodes_desc.dtype);
   if (*host_output_neighbor_raw_to_unique_mapping_ptr == nullptr) {
     *host_output_neighbor_raw_to_unique_mapping_ptr = (void*)malloc(
-      wholememory_get_memory_size_from_array(&output_neighbor_raw_to_unique_mapping_desc));
+      wholegraph_get_memory_size_from_array(&output_neighbor_raw_to_unique_mapping_desc));
   }
 
-  if (output_unique_nodes_desc.dtype == WHOLEMEMORY_DT_INT) {
+  if (output_unique_nodes_desc.dtype == WHOLEGRAPH_DT_INT) {
     host_get_append_unique_neighbor_raw_to_unique<int>(
       host_output_unique_nodes_ptr,
       output_unique_nodes_desc,
@@ -178,7 +178,7 @@ void host_gen_append_unique_neighbor_raw_to_unique(
       neighbor_nodes_desc,
       host_output_neighbor_raw_to_unique_mapping_ptr,
       output_neighbor_raw_to_unique_mapping_desc);
-  } else if (output_unique_nodes_desc.dtype == WHOLEMEMORY_DT_INT64) {
+  } else if (output_unique_nodes_desc.dtype == WHOLEGRAPH_DT_INT64) {
     host_get_append_unique_neighbor_raw_to_unique<int64_t>(
       host_output_unique_nodes_ptr,
       output_unique_nodes_desc,

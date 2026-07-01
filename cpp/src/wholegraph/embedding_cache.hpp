@@ -1,0 +1,134 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2024, NVIDIA CORPORATION.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#pragma once
+
+#include <cuda_runtime_api.h>
+
+#include <wholegraph/embedding.h>
+#include <wholegraph/wholegraph_tensor.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct wholegraph_embedding_cache_policy_ {
+  wholegraph_comm_t cache_comm = nullptr;  // nullptr means only use local GPU
+  wholegraph_memory_type_t cache_memory_type;
+  wholegraph_memory_location_t cache_memory_location;
+  wholegraph_access_type_t access_type;
+  float cache_ratio = 0.2F;
+};
+
+#ifdef __cplusplus
+}
+#endif
+
+namespace wholegraph {
+
+class embedding_cache_local_data {
+ public:
+  embedding_cache_local_data() = default;
+  ~embedding_cache_local_data();
+
+  wholegraph_tensor_t cache_line_tag_       = nullptr;
+  wholegraph_tensor_t cache_line_lfu_count_ = nullptr;
+  wholegraph_tensor_t cache_line_data_      = nullptr;
+  wholegraph_tensor_t access_count_         = nullptr;
+};
+
+class embedding_cache_base {
+ public:
+  explicit embedding_cache_base(wholegraph_embedding_cache_policy_t cache_policy);
+  embedding_cache_base()                            = delete;
+  embedding_cache_base(const embedding_cache_base&) = delete;
+  virtual ~embedding_cache_base();
+
+  embedding_cache_local_data* get_cache_local_data() { return &local_cache_; }
+  [[nodiscard]] int get_cache_set_coverage() const { return cache_set_coverage_; }
+
+  virtual wholegraph_error_code_t get_embedding_requirement(
+    wholegraph_tensor_description_t* padded_desc,
+    wholegraph_matrix_description_t data_desc,
+    wholegraph_comm_t comm,
+    wholegraph_memory_type_t memory_type,
+    wholegraph_memory_location_t memory_location) noexcept = 0;
+
+  wholegraph_error_code_t allocate(wholegraph_tensor_t raw_data_tensor) noexcept;
+
+  virtual wholegraph_error_code_t writeback_all_cache(cudaStream_t stream) noexcept;
+  virtual wholegraph_error_code_t drop_all_cache(cudaStream_t stream) noexcept;
+  // wholegraph_error_code_t refill_all_cache(cudaStream_t stream) noexcept;
+
+  static constexpr int64_t kEmbeddingAlignmentInBytes = 16;
+  static constexpr int kCacheSetSize                  = 32;
+  // Tag format:
+  // 1 bit Valid, 1 bit Modified, 14 bit indice.
+  static constexpr int kCacheSetCoverageBits    = 14;  // 2 bits left for modified and valid state
+  static constexpr uint16_t kvalidCacheTagValue = 1U << (kCacheSetCoverageBits + 1);
+  static constexpr int kMaxCacheSetCoverage     = 1 << kCacheSetCoverageBits;
+  // Counter format:
+  // 14 bit scaled counter, 2 bit per thread (64 bit per set) set scaling info.
+  static constexpr int kScaledCounterBits =
+    14;  // 2 bits (64 bits in set) left for scale and reserved
+
+  // cache related tensor
+  wholegraph_tensor_t cache_line_tag_wg_tensor_       = nullptr;
+  wholegraph_tensor_t cache_line_lfu_count_wg_tensor_ = nullptr;
+  wholegraph_tensor_t cache_line_data_wg_tensor_      = nullptr;
+  wholegraph_tensor_t access_count_wg_tensor_         = nullptr;
+
+ protected:
+  void pad_last_dim(wholegraph_matrix_description_t data_desc) noexcept;
+  wholegraph_error_code_t compute_cache_set_coverage() noexcept;
+  wholegraph_error_code_t check_raw_tensor(wholegraph_tensor_t raw_data_tensor) noexcept;
+
+  wholegraph_matrix_description_t padded_matrix_description_;
+  wholegraph_matrix_description_t matrix_description_;
+
+  wholegraph_tensor_t padded_raw_tensor_            = nullptr;  // just a reference, not owned
+  wholegraph_comm_t raw_comm_                       = nullptr;
+  wholegraph_memory_type_t raw_memory_type_         = WHOLEGRAPH_MT_NONE;
+  wholegraph_memory_location_t raw_memory_location_ = WHOLEGRAPH_ML_NONE;
+
+  wholegraph_embedding_cache_policy_t cache_policy_ = nullptr;
+
+  int cache_set_coverage_                   = kCacheSetSize;
+  int64_t padded_embedding_count_for_cache_ = 0;
+
+  embedding_cache_local_data local_cache_;
+};
+
+class device_cache_for_host : public embedding_cache_base {
+ public:
+  device_cache_for_host(wholegraph_embedding_cache_policy_t cache_policy);
+  device_cache_for_host()                             = delete;
+  device_cache_for_host(const device_cache_for_host&) = delete;
+  ~device_cache_for_host();
+  wholegraph_error_code_t get_embedding_requirement(
+    wholegraph_tensor_description_t* padded_desc,
+    wholegraph_matrix_description_t data_desc,
+    wholegraph_comm_t comm,
+    wholegraph_memory_type_t memory_type,
+    wholegraph_memory_location_t memory_location) noexcept override;
+  wholegraph_error_code_t writeback_all_cache(cudaStream_t stream) noexcept override;
+  wholegraph_error_code_t drop_all_cache(cudaStream_t stream) noexcept override;
+};
+
+class local_cache_for_global : public embedding_cache_base {
+ public:
+  local_cache_for_global(wholegraph_embedding_cache_policy_t cache_policy);
+  local_cache_for_global()                              = delete;
+  local_cache_for_global(const local_cache_for_global&) = delete;
+  ~local_cache_for_global();
+  wholegraph_error_code_t get_embedding_requirement(
+    wholegraph_tensor_description_t* padded_desc,
+    wholegraph_matrix_description_t data_desc,
+    wholegraph_comm_t comm,
+    wholegraph_memory_type_t memory_type,
+    wholegraph_memory_location_t memory_location) noexcept override;
+  wholegraph_error_code_t drop_all_cache(cudaStream_t stream) noexcept override;
+};
+
+}  // namespace wholegraph

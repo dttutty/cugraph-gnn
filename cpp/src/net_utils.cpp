@@ -34,9 +34,9 @@ static void ResolveHostName(sockaddr_in* saddr, const std::string& host_name, in
 int CreateServerListenFd(int port)
 {
   int server_sock = socket(AF_INET, SOCK_STREAM, 0);
-  WHOLEMEMORY_CHECK_NOTHROW(server_sock >= 0);
+  WHOLEGRAPH_CHECK_NOTHROW(server_sock >= 0);
   int enable = 1;
-  WHOLEMEMORY_CHECK_NOTHROW(
+  WHOLEGRAPH_CHECK_NOTHROW(
     setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == 0);
 
   // Binding
@@ -46,14 +46,14 @@ int CreateServerListenFd(int port)
   server_addr.sin_port        = htons(port);
   server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  WHOLEMEMORY_CHECK_NOTHROW(bind(server_sock, (sockaddr*)&server_addr, sizeof(server_addr)) == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(bind(server_sock, (sockaddr*)&server_addr, sizeof(server_addr)) == 0);
 
   return server_sock;
 }
 
 void ServerListen(int listen_fd, int backlog)
 {
-  WHOLEMEMORY_CHECK_NOTHROW(listen(listen_fd, backlog) == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(listen(listen_fd, backlog) == 0);
 }
 
 int ServerAccept(int listen_fd, sockaddr_in* client_addr, socklen_t* client_addr_len)
@@ -65,13 +65,13 @@ int ServerAccept(int listen_fd, sockaddr_in* client_addr, socklen_t* client_addr
 int CreateClientFd(const std::string& server_name, int server_port)
 {
   int client_sock = socket(AF_INET, SOCK_STREAM, 0);
-  WHOLEMEMORY_CHECK_NOTHROW(client_sock >= 0);
+  WHOLEGRAPH_CHECK_NOTHROW(client_sock >= 0);
 
   sockaddr_in server_addr;
   ResolveHostName(&server_addr, server_name, server_port);
 
-  WHOLEMEMORY_CHECK_NOTHROW(server_addr.sin_family == AF_INET);
-  WHOLEMEMORY_CHECK_NOTHROW(server_addr.sin_port == htons(server_port));
+  WHOLEGRAPH_CHECK_NOTHROW(server_addr.sin_family == AF_INET);
+  WHOLEGRAPH_CHECK_NOTHROW(server_addr.sin_port == htons(server_port));
 #if 0
   inet_pton(AF_INET, server_name.c_str(), &server_addr.sin_addr);
 #endif
@@ -97,7 +97,7 @@ void SingleSend(int sock_fd, const void* send_data, size_t send_size)
   if (bytes_send < 0) {
     printf("recv returned %ld, errno=%d %s\n", bytes_send, errno, strerror(errno));
   }
-  WHOLEMEMORY_CHECK_NOTHROW(bytes_send == send_size);
+  WHOLEGRAPH_CHECK_NOTHROW(bytes_send == send_size);
 }
 
 void SingleRecv(int sock_fd, void* recv_data, size_t recv_size)
@@ -106,5 +106,5 @@ void SingleRecv(int sock_fd, void* recv_data, size_t recv_size)
   if (bytes_received < 0) {
     printf("recv returned %ld, errno=%d %s\n", bytes_received, errno, strerror(errno));
   }
-  WHOLEMEMORY_CHECK_NOTHROW(bytes_received == recv_size);
+  WHOLEGRAPH_CHECK_NOTHROW(bytes_received == recv_size);
 }

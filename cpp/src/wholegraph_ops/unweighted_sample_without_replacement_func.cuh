@@ -10,14 +10,14 @@
 #include <raft/random/rng_device.cuh>
 #include <raft/random/rng_state.hpp>
 #include <raft/util/integer_utils.hpp>
-#include <wholememory/device_reference.cuh>
-#include <wholememory/env_func_ptrs.h>
-#include <wholememory/global_reference.h>
-#include <wholememory/tensor_description.h>
+#include <wholegraph/device_reference.cuh>
+#include <wholegraph/env_func_ptrs.h>
+#include <wholegraph/global_reference.h>
+#include <wholegraph/tensor_description.h>
 
-#include "wholememory_ops/output_memory_handle.hpp"
-#include "wholememory_ops/temp_memory_handle.hpp"
-#include "wholememory_ops/thrust_allocator.hpp"
+#include "wholegraph_tensor_ops/output_memory_handle.hpp"
+#include "wholegraph_tensor_ops/temp_memory_handle.hpp"
+#include "wholegraph_tensor_ops/thrust_allocator.hpp"
 
 #include "cuda_macros.hpp"
 #include "error.hpp"
@@ -25,10 +25,10 @@
 
 namespace wholegraph_ops {
 
-template <typename IdType, typename WMOffsetType>
+template <typename IdType, typename WGOffsetType>
 __global__ void get_sample_count_without_replacement_kernel(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
   const IdType* input_nodes,
   const int input_node_count,
   int* tmp_sample_count_mem_pointer,
@@ -38,28 +38,28 @@ __global__ void get_sample_count_without_replacement_kernel(
   int input_idx = gidx;
   if (input_idx >= input_node_count) return;
   IdType nid = input_nodes[input_idx];
-  wholememory::device_reference<WMOffsetType> wm_csr_row_ptr_dev_ref(wm_csr_row_ptr);
-  int64_t start      = wm_csr_row_ptr_dev_ref[nid];
-  int64_t end        = wm_csr_row_ptr_dev_ref[nid + 1];
+  wholegraph::device_reference<WGOffsetType> wg_csr_row_ptr_dev_ref(wg_csr_row_ptr);
+  int64_t start      = wg_csr_row_ptr_dev_ref[nid];
+  int64_t end        = wg_csr_row_ptr_dev_ref[nid + 1];
   int neighbor_count = (int)(end - start);
   // sample_count <= 0 means sample all.
   if (max_sample_count > 0) { neighbor_count = min(neighbor_count, max_sample_count); }
   tmp_sample_count_mem_pointer[input_idx] = neighbor_count;
 }
 
-template <typename IdType, typename LocalIdType, typename WMIdType, typename WMOffsetType>
+template <typename IdType, typename LocalIdType, typename WGIdType, typename WGOffsetType>
 __global__ void large_sample_kernel(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
-  wholememory_gref_t wm_csr_col_ptr,
-  wholememory_array_description_t wm_csr_col_ptr_desc,
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_col_ptr,
+  wholegraph_array_description_t wg_csr_col_ptr_desc,
   const IdType* input_nodes,
   const int input_node_count,
   const int max_sample_count,
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate,
   const int* sample_offset,
-  wholememory_array_description_t sample_offset_desc,
-  WMIdType* output,
+  wholegraph_array_description_t sample_offset_desc,
+  WGIdType* output,
   int* src_lid,
   int64_t* output_edge_gid_ptr)
 {
@@ -67,8 +67,8 @@ __global__ void large_sample_kernel(
   if (input_idx >= input_node_count) return;
   int gidx = threadIdx.x + blockIdx.x * blockDim.x;
   raft::random::detail::PCGenerator rng(rngstate, (uint64_t)gidx);
-  wholememory::device_reference<WMOffsetType> csr_row_ptr_gen(wm_csr_row_ptr);
-  wholememory::device_reference<WMIdType> csr_col_ptr_gen(wm_csr_col_ptr);
+  wholegraph::device_reference<WGOffsetType> csr_row_ptr_gen(wg_csr_row_ptr);
+  wholegraph::device_reference<WGIdType> csr_col_ptr_gen(wg_csr_col_ptr);
 
   IdType nid         = input_nodes[input_idx];
   int64_t start      = csr_row_ptr_gen[nid];
@@ -114,22 +114,22 @@ __global__ void large_sample_kernel(
 
 template <typename IdType,
           typename LocalIdType,
-          typename WMIdType,
-          typename WMOffsetType,
+          typename WGIdType,
+          typename WGOffsetType,
           int BLOCK_DIM        = 32,
           int ITEMS_PER_THREAD = 1>
 __global__ void unweighted_sample_without_replacement_kernel(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
-  wholememory_gref_t wm_csr_col_ptr,
-  wholememory_array_description_t wm_csr_col_ptr_desc,
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_col_ptr,
+  wholegraph_array_description_t wg_csr_col_ptr_desc,
   const IdType* input_nodes,
   const int input_node_count,
   const int max_sample_count,
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate,
   const int* sample_offset,
-  wholememory_array_description_t sample_offset_desc,
-  WMIdType* output,
+  wholegraph_array_description_t sample_offset_desc,
+  WGIdType* output,
   int* src_lid,
   int64_t* output_edge_gid_ptr)
 {
@@ -138,8 +138,8 @@ __global__ void unweighted_sample_without_replacement_kernel(
   int input_idx = blockIdx.x;
   if (input_idx >= input_node_count) return;
 
-  wholememory::device_reference<WMOffsetType> csr_row_ptr_gen(wm_csr_row_ptr);
-  wholememory::device_reference<WMIdType> csr_col_ptr_gen(wm_csr_col_ptr);
+  wholegraph::device_reference<WGOffsetType> csr_row_ptr_gen(wg_csr_row_ptr);
+  wholegraph::device_reference<WGIdType> csr_col_ptr_gen(wg_csr_col_ptr);
 
   IdType nid         = input_nodes[input_idx];
   int64_t start      = csr_row_ptr_gen[nid];
@@ -270,196 +270,196 @@ __global__ void unweighted_sample_without_replacement_kernel(
   }
 }
 
-template <typename IdType, typename WMIdType>
+template <typename IdType, typename WGIdType>
 void wholegraph_csr_unweighted_sample_without_replacement_func(
-  wholememory_gref_t wm_csr_row_ptr,
-  wholememory_array_description_t wm_csr_row_ptr_desc,
-  wholememory_gref_t wm_csr_col_ptr,
-  wholememory_array_description_t wm_csr_col_ptr_desc,
+  wholegraph_gref_t wg_csr_row_ptr,
+  wholegraph_array_description_t wg_csr_row_ptr_desc,
+  wholegraph_gref_t wg_csr_col_ptr,
+  wholegraph_array_description_t wg_csr_col_ptr_desc,
   void* center_nodes,
-  wholememory_array_description_t center_nodes_desc,
+  wholegraph_array_description_t center_nodes_desc,
   int max_sample_count,
   void* output_sample_offset,
-  wholememory_array_description_t output_sample_offset_desc,
+  wholegraph_array_description_t output_sample_offset_desc,
   void* output_dest_memory_context,
   void* output_center_localid_memory_context,
   void* output_edge_gid_memory_context,
   unsigned long long random_seed,
-  wholememory_env_func_t* p_env_fns,
+  wholegraph_env_func_t* p_env_fns,
   cudaStream_t stream)
 {
   int center_node_count = center_nodes_desc.size;
 
-  WHOLEMEMORY_EXPECTS(wm_csr_row_ptr_desc.dtype == WHOLEMEMORY_DT_INT64,
+  WHOLEGRAPH_EXPECTS(wg_csr_row_ptr_desc.dtype == WHOLEGRAPH_DT_INT64,
                       "wholegraph_csr_unweighted_sample_without_replacement_func(). "
-                      "wm_csr_row_ptr_desc.dtype != WHOLEMEMORY_DT_INT64, "
-                      "wm_csr_row_ptr_desc.dtype = %d",
-                      wm_csr_row_ptr_desc.dtype);
+                      "wg_csr_row_ptr_desc.dtype != WHOLEGRAPH_DT_INT64, "
+                      "wg_csr_row_ptr_desc.dtype = %d",
+                      wg_csr_row_ptr_desc.dtype);
 
-  WHOLEMEMORY_EXPECTS(output_sample_offset_desc.dtype == WHOLEMEMORY_DT_INT,
+  WHOLEGRAPH_EXPECTS(output_sample_offset_desc.dtype == WHOLEGRAPH_DT_INT,
                       "wholegraph_csr_unweighted_sample_without_replacement_func(). "
-                      "output_sample_offset_desc.dtype != WHOLEMEMORY_DT_INT, "
+                      "output_sample_offset_desc.dtype != WHOLEGRAPH_DT_INT, "
                       "output_sample_offset_desc.dtype = %d",
                       output_sample_offset_desc.dtype);
 
-  wholememory_ops::temp_memory_handle gen_buffer_tmh(p_env_fns);
+  wholegraph_tensor_ops::temp_memory_handle gen_buffer_tmh(p_env_fns);
   int* tmp_sample_count_mem_pointer =
-    (int*)gen_buffer_tmh.device_malloc(center_node_count + 1, WHOLEMEMORY_DT_INT);
+    (int*)gen_buffer_tmh.device_malloc(center_node_count + 1, WHOLEGRAPH_DT_INT);
 
   int thread_x    = 32;
   int block_count = raft::div_rounding_up_safe<int>(center_node_count, thread_x);
 
   get_sample_count_without_replacement_kernel<IdType, int64_t>
-    <<<block_count, thread_x, 0, stream>>>(wm_csr_row_ptr,
-                                           wm_csr_row_ptr_desc,
+    <<<block_count, thread_x, 0, stream>>>(wg_csr_row_ptr,
+                                           wg_csr_row_ptr_desc,
                                            (const IdType*)center_nodes,
                                            center_node_count,
                                            tmp_sample_count_mem_pointer,
                                            max_sample_count);
-  WM_CUDA_CHECK(cudaGetLastError());
+  WG_CUDA_CHECK(cudaGetLastError());
 
   // prefix sum
-  wholememory_ops::wm_thrust_allocator thrust_allocator(p_env_fns);
+  wholegraph_tensor_ops::wg_thrust_allocator thrust_allocator(p_env_fns);
   thrust::exclusive_scan(thrust::cuda::par_nosync(thrust_allocator).on(stream),
                          tmp_sample_count_mem_pointer,
                          tmp_sample_count_mem_pointer + center_node_count + 1,
                          (int*)output_sample_offset);
 
   int count;
-  WM_CUDA_CHECK(cudaMemcpyAsync(&count,
+  WG_CUDA_CHECK(cudaMemcpyAsync(&count,
                                 ((int*)output_sample_offset) + center_node_count,
                                 sizeof(int),
                                 cudaMemcpyDeviceToHost,
                                 stream));
-  WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+  WG_CUDA_CHECK(cudaStreamSynchronize(stream));
 
-  wholememory_ops::output_memory_handle gen_output_dest_buffer_mh(p_env_fns,
+  wholegraph_tensor_ops::output_memory_handle gen_output_dest_buffer_mh(p_env_fns,
                                                                   output_dest_memory_context);
-  WMIdType* output_dest_node_ptr =
-    (WMIdType*)gen_output_dest_buffer_mh.device_malloc(count, wm_csr_col_ptr_desc.dtype);
+  WGIdType* output_dest_node_ptr =
+    (WGIdType*)gen_output_dest_buffer_mh.device_malloc(count, wg_csr_col_ptr_desc.dtype);
 
   int* output_center_localid_ptr = nullptr;
   if (output_center_localid_memory_context) {
-    wholememory_ops::output_memory_handle gen_output_center_localid_buffer_mh(
+    wholegraph_tensor_ops::output_memory_handle gen_output_center_localid_buffer_mh(
       p_env_fns, output_center_localid_memory_context);
     output_center_localid_ptr =
-      (int*)gen_output_center_localid_buffer_mh.device_malloc(count, WHOLEMEMORY_DT_INT);
+      (int*)gen_output_center_localid_buffer_mh.device_malloc(count, WHOLEGRAPH_DT_INT);
   }
 
   int64_t* output_edge_gid_ptr = nullptr;
   if (output_edge_gid_memory_context) {
-    wholememory_ops::output_memory_handle gen_output_edge_gid_buffer_mh(
+    wholegraph_tensor_ops::output_memory_handle gen_output_edge_gid_buffer_mh(
       p_env_fns, output_edge_gid_memory_context);
     output_edge_gid_ptr =
-      (int64_t*)gen_output_edge_gid_buffer_mh.device_malloc(count, WHOLEMEMORY_DT_INT64);
+      (int64_t*)gen_output_edge_gid_buffer_mh.device_malloc(count, WHOLEGRAPH_DT_INT64);
   }
   // sample node
   raft::random::RngState _rngstate(random_seed, 0, raft::random::GeneratorType::GenPC);
   raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate(_rngstate);
   if (max_sample_count <= 0) {
-    sample_all_kernel<IdType, int, WMIdType, int64_t>
-      <<<center_node_count, 64, 0, stream>>>(wm_csr_row_ptr,
-                                             wm_csr_row_ptr_desc,
-                                             wm_csr_col_ptr,
-                                             wm_csr_col_ptr_desc,
+    sample_all_kernel<IdType, int, WGIdType, int64_t>
+      <<<center_node_count, 64, 0, stream>>>(wg_csr_row_ptr,
+                                             wg_csr_row_ptr_desc,
+                                             wg_csr_col_ptr,
+                                             wg_csr_col_ptr_desc,
                                              (const IdType*)center_nodes,
                                              center_node_count,
                                              (const int*)output_sample_offset,
                                              output_sample_offset_desc,
-                                             (WMIdType*)output_dest_node_ptr,
+                                             (WGIdType*)output_dest_node_ptr,
                                              (int*)output_center_localid_ptr,
                                              (int64_t*)output_edge_gid_ptr);
 
-    WM_CUDA_CHECK(cudaGetLastError());
-    WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+    WG_CUDA_CHECK(cudaGetLastError());
+    WG_CUDA_CHECK(cudaStreamSynchronize(stream));
     return;
   }
 
   if (max_sample_count > 1024) {
-    large_sample_kernel<IdType, int, WMIdType, int64_t>
-      <<<center_node_count, 32, 0, stream>>>(wm_csr_row_ptr,
-                                             wm_csr_row_ptr_desc,
-                                             wm_csr_col_ptr,
-                                             wm_csr_col_ptr_desc,
+    large_sample_kernel<IdType, int, WGIdType, int64_t>
+      <<<center_node_count, 32, 0, stream>>>(wg_csr_row_ptr,
+                                             wg_csr_row_ptr_desc,
+                                             wg_csr_col_ptr,
+                                             wg_csr_col_ptr_desc,
                                              (const IdType*)center_nodes,
                                              center_node_count,
                                              max_sample_count,
                                              rngstate,
                                              (const int*)output_sample_offset,
                                              output_sample_offset_desc,
-                                             (WMIdType*)output_dest_node_ptr,
+                                             (WGIdType*)output_dest_node_ptr,
                                              (int*)output_center_localid_ptr,
                                              (int64_t*)output_edge_gid_ptr);
-    WM_CUDA_CHECK(cudaGetLastError());
-    WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+    WG_CUDA_CHECK(cudaGetLastError());
+    WG_CUDA_CHECK(cudaStreamSynchronize(stream));
     return;
   }
 
   typedef void (*unweighted_sample_func_type)(
-    wholememory_gref_t wm_csr_row_ptr,
-    wholememory_array_description_t wm_csr_row_ptr_desc,
-    wholememory_gref_t wm_csr_col_ptr,
-    wholememory_array_description_t wm_csr_col_ptr_desc,
+    wholegraph_gref_t wg_csr_row_ptr,
+    wholegraph_array_description_t wg_csr_row_ptr_desc,
+    wholegraph_gref_t wg_csr_col_ptr,
+    wholegraph_array_description_t wg_csr_col_ptr_desc,
     const IdType* input_nodes,
     const int input_node_count,
     const int max_sample_count,
     raft::random::detail::DeviceState<raft::random::detail::PCGenerator> rngstate,
     const int* sample_offset,
-    wholememory_array_description_t sample_offset_desc,
-    WMIdType* output,
+    wholegraph_array_description_t sample_offset_desc,
+    WGIdType* output,
     int* src_lid,
     int64_t* output_edge_gid_ptr);
   static const unweighted_sample_func_type func_array[32] = {
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 32, 1>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 32, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 32, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 64, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 64, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 64, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 128, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 2>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 3>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>,
-    unweighted_sample_without_replacement_kernel<IdType, int, WMIdType, int64_t, 256, 4>};
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 32, 1>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 32, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 32, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 64, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 64, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 64, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 128, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 2>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 3>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>,
+    unweighted_sample_without_replacement_kernel<IdType, int, WGIdType, int64_t, 256, 4>};
   static const int warp_count_array[32] = {1, 1, 1, 2, 2, 2, 4, 4, 4, 4, 4, 4, 8, 8, 8, 8,
                                            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8};
   int func_idx                          = (max_sample_count - 1) / 32;
   func_array[func_idx]<<<center_node_count, warp_count_array[func_idx] * 32, 0, stream>>>(
-    wm_csr_row_ptr,
-    wm_csr_row_ptr_desc,
-    wm_csr_col_ptr,
-    wm_csr_col_ptr_desc,
+    wg_csr_row_ptr,
+    wg_csr_row_ptr_desc,
+    wg_csr_col_ptr,
+    wg_csr_col_ptr_desc,
     (const IdType*)center_nodes,
     center_node_count,
     max_sample_count,
     rngstate,
     (const int*)output_sample_offset,
     output_sample_offset_desc,
-    (WMIdType*)output_dest_node_ptr,
+    (WGIdType*)output_dest_node_ptr,
     (int*)output_center_localid_ptr,
     (int64_t*)output_edge_gid_ptr);
-  WM_CUDA_CHECK(cudaGetLastError());
-  WM_CUDA_CHECK(cudaStreamSynchronize(stream));
+  WG_CUDA_CHECK(cudaGetLastError());
+  WG_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 }  // namespace wholegraph_ops

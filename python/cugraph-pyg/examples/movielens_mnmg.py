@@ -1,0 +1,521 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Multi-node, multi-GPU link prediction example on MovieLens data.
+
+This example demonstrates link prediction (user-movie recommendations) using
+heterogeneous graph neural networks in a distributed setting across multiple nodes
+and GPUs. It uses the MovieLens dataset, loads it on rank 0, partitions it, and
+trains a graph encoder and decoder model.
+
+WARNING: For large datasets, this approach may exceed a single worker's host
+memory during the initial loading and partitioning phase. The MovieLens dataset
+requires downloading and embedding large text fields, which can be memory-intensive.
+Consider pre-partitioning the data if you encounter out-of-memory errors.
+
+Can be run with: torchrun --nproc-per-node=<num_gpus> movielens_mnmg.py
+"""
+
+import os
+import warnings
+from argparse import ArgumentParser
+from datetime import timedelta
+
+import json
+
+import torch
+import torch.nn.functional as F
+
+from torch.nn import Linear
+
+
+from tqdm import tqdm
+
+from torch_geometric import EdgeIndex
+from torch_geometric.datasets import MovieLens
+
+from torch_geometric.nn import SAGEConv
+from torch_geometric.data import HeteroData
+
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+from cugraph_pyg.data import GraphStore, FeatureStore
+
+from wholegraph_torch.initialize import (
+    finalize as wg_finalize,
+)
+
+from sklearn.metrics import roc_auc_score
+
+
+def init_pytorch_worker(global_rank, local_rank, world_size, cugraph_id):
+    import rmm
+
+    rmm.reinitialize(
+        devices=local_rank,
+        managed_memory=False,
+        pool_allocator=False,
+    )
+
+    import cupy
+
+    cupy.cuda.Device(local_rank).use()
+    from rmm.allocators.cupy import rmm_cupy_allocator
+
+    cupy.cuda.set_allocator(rmm_cupy_allocator)
+
+    torch.cuda.set_device(local_rank)
+
+    from pylibcugraph.comms import cugraph_comms_init
+
+    cugraph_comms_init(
+        rank=global_rank, world_size=world_size, uid=cugraph_id, device=local_rank
+    )
+
+    # WholeGraph is initialized automatically.
+
+
+def write_edges(edge_index, path):
+    world_size = torch.distributed.get_world_size()
+
+    os.makedirs(path, exist_ok=True)
+    for r, e in enumerate(torch.tensor_split(edge_index, world_size, dim=1)):
+        rank_path = os.path.join(path, f"rank={r}.pt")
+        torch.save(
+            e.clone(),
+            rank_path,
+        )
+
+
+def cugraph_pyg_from_heterodata(data):
+    graph_store = GraphStore()
+    feature_store = FeatureStore()
+
+    graph_store[
+        ("user", "rates", "movie"),
+        "coo",
+        False,
+        (data["user"].num_nodes, data["movie"].num_nodes),
+    ] = data["user", "rates", "movie"].edge_index
+
+    graph_store[
+        ("movie", "rev_rates", "user"),
+        "coo",
+        False,
+        (data["movie"].num_nodes, data["user"].num_nodes),
+    ] = data["movie", "rev_rates", "user"].edge_index
+
+    feature_store["user", "x", None] = data["user"].x
+    feature_store["movie", "x", None] = data["movie"].x
+    feature_store[("user", "rates", "movie"), "time", None] = data[
+        "user", "rates", "movie"
+    ].time
+    feature_store[("movie", "rev_rates", "user"), "time", None] = data[
+        "user", "rates", "movie"
+    ].time
+
+    return feature_store, graph_store
+
+
+def preprocess_and_partition(data, edge_path, features_path, meta_path):
+    world_size = torch.distributed.get_world_size()
+
+    # Only use edges with high ratings (>= 4):
+    mask = data["user", "rates", "movie"].edge_label >= 4
+    data["user", "movie"].edge_index = data["user", "movie"].edge_index[:, mask]
+    data["user", "movie"].time = data["user", "movie"].time[mask]
+    del data["user", "movie"].edge_label  # Drop rating information from graph.
+
+    # Perform a temporal link-level split into training and test edges:
+    time = data["user", "movie"].time
+    perm = time.argsort()
+
+    # Reorder the edge index so the time split is even
+    data["user", "movie"] = data["user", "movie"].edge_index[:, perm]
+
+    # Reserve first 80% for train, last 20% for test
+    off = int(0.8 * perm.numel())
+    ei = {
+        "train": data["user", "movie"].edge_index[:, :off],
+        "test": data["user", "movie"].edge_index[:, off:],
+    }
+
+    print("Writing edges...")
+    user_movie_edge_path = os.path.join(edge_path, "user_movie")
+    for d, eid in ei.items():
+        d_path = os.path.join(user_movie_edge_path, d)
+        write_edges(eid, d_path)
+
+    print("Writing features...")
+    movie_path = os.path.join(features_path, "movie")
+    os.makedirs(
+        movie_path,
+        exist_ok=True,
+    )
+    for r, fx in enumerate(torch.tensor_split(data["movie"].x, world_size)):
+        torch.save(
+            fx,
+            os.path.join(movie_path, f"rank={r}.pt"),
+        )
+    time_path = os.path.join(features_path, "time")
+    os.makedirs(
+        time_path,
+        exist_ok=True,
+    )
+    for r, time in enumerate(
+        torch.tensor_split(data["user", "movie"].time, world_size)
+    ):
+        torch.save(
+            time,
+            os.path.join(time_path, f"rank={r}.pt"),
+        )
+    print("Writing metadata...")
+    meta = {
+        "num_nodes": {
+            "movie": data["movie"].num_nodes,
+            "user": data["user"].num_nodes,
+        }
+    }
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+
+def load_partitions(edge_path, features_path, meta_path):
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    data = HeteroData()
+
+    # Load metadata
+    print("Loading metadata...")
+    with open(meta_path, "r") as f:
+        meta = json.load(f)
+
+    data["user"].num_nodes = meta["num_nodes"]["user"]
+    data["movie"].num_nodes = meta["num_nodes"]["movie"]
+    data["user"].x = (
+        torch.tensor_split(
+            torch.eye(data["user"].num_nodes, dtype=torch.float32), world_size
+        )[rank]
+        .detach()
+        .clone()
+    )
+    data["movie"].x = torch.load(
+        os.path.join(features_path, "movie", f"rank={rank}.pt"),
+        weights_only=True,
+    )
+
+    # T.ToUndirected() will not work here because we are working with
+    # partitioned data.  The number of nodes will not match.
+
+    print("Loading user->movie edge index...")
+    ei = {}
+    for d in {"train", "test"}:
+        ei[d] = torch.load(
+            os.path.join(edge_path, "user_movie", d, f"rank={rank}.pt"),
+            weights_only=True,
+        )
+
+    data["user", "rates", "movie"].edge_index = torch.concat(
+        [
+            ei["train"],
+            ei["test"],
+        ],
+        dim=1,
+    )
+    data["user", "rates", "movie"].time = torch.load(
+        os.path.join(features_path, "time", f"rank={rank}.pt"),
+        weights_only=True,
+    )
+
+    label_dict = {
+        "train": torch.randperm(ei["train"].shape[1]),
+        "test": torch.randperm(ei["test"].shape[1]) + ei["train"].shape[1],
+    }
+
+    data["movie", "rev_rates", "user"].edge_index = torch.stack(
+        [
+            data["user", "rates", "movie"].edge_index[1],
+            data["user", "rates", "movie"].edge_index[0],
+        ]
+    )
+
+    print(f"Finished loading graph data on rank {rank}")
+    return data, label_dict
+
+
+class Encoder(torch.nn.Module):
+    def __init__(
+        self, user_in_channels, movie_in_channels, hidden_channels, out_channels
+    ):
+        super().__init__()
+        self.conv1 = SAGEConv((movie_in_channels, user_in_channels), hidden_channels)
+        self.conv2 = SAGEConv((user_in_channels, movie_in_channels), hidden_channels)
+        self.conv3 = SAGEConv((hidden_channels, hidden_channels), hidden_channels)
+        self.lin1 = Linear(hidden_channels, out_channels)
+        self.lin2 = Linear(hidden_channels, out_channels)
+
+    def forward(self, x_dict, edge_index_dict):
+        user_x = self.conv1(
+            (x_dict["movie"], x_dict["user"]),
+            edge_index_dict["movie", "rev_rates", "user"],
+        ).relu()
+
+        movie_x = self.conv2(
+            (x_dict["user"], x_dict["movie"]), edge_index_dict["user", "rates", "movie"]
+        ).relu()
+
+        user_x = self.conv3(
+            (movie_x, user_x), edge_index_dict["movie", "rev_rates", "user"]
+        ).relu()
+
+        return {
+            "user": self.lin1(user_x),
+            "movie": self.lin2(movie_x),
+        }
+
+
+class EdgeDecoder(torch.nn.Module):
+    def __init__(self, hidden_channels):
+        super().__init__()
+        self.lin1 = Linear(2 * hidden_channels, hidden_channels)
+        self.lin2 = Linear(hidden_channels, 1)
+
+    def forward(self, x_dict, edge_label_index):
+        row, col = edge_label_index
+        z = torch.cat(
+            [
+                x_dict["user"][row],
+                x_dict["movie"][col],
+            ],
+            dim=-1,
+        )
+
+        z = self.lin1(z).relu()
+        z = self.lin2(z)
+        return z.view(-1)
+
+
+class Model(torch.nn.Module):
+    def __init__(self, hidden_channels, metadata, num_features):
+        super().__init__()
+        self.encoder = Encoder(
+            user_in_channels=num_features["user"],
+            movie_in_channels=num_features["movie"],
+            hidden_channels=hidden_channels,
+            out_channels=hidden_channels,
+        )
+        self.decoder = EdgeDecoder(hidden_channels)
+
+    def forward(self, x_dict, edge_index_dict, num_samples):
+        x_dict = self.encoder(x_dict, edge_index_dict)
+        return self.decoder(
+            x_dict, edge_index_dict["user", "rates", "movie"][:, :num_samples]
+        )
+
+
+def train(train_loader, model, optimizer):
+    model.train()
+
+    total_loss = total_examples = 0
+    for batch in tqdm(train_loader):
+        batch = batch.to(device)
+        optimizer.zero_grad()
+
+        out = model(
+            batch.x_dict,
+            batch.edge_index_dict,
+            batch["user", "rates", "movie"].edge_label.shape[0],
+        )
+
+        y = batch["user", "rates", "movie"].edge_label
+
+        loss = F.binary_cross_entropy_with_logits(out, y)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += float(loss) * y.numel()
+        total_examples += y.numel()
+
+    return total_loss / total_examples
+
+
+@torch.no_grad()
+def test(test_loader, model):
+    model.eval()
+
+    preds = []
+    targets = []
+    for batch in test_loader:
+        batch = batch.to(device)
+        pred = (
+            model(
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch["user", "rates", "movie"].edge_label.shape[0],
+            )
+            .sigmoid()
+            .view(-1)
+            .cpu()
+        )
+
+        target = batch["user", "rates", "movie"].edge_label.long().cpu()
+
+        preds.append(pred)
+        targets.append(target)
+
+    pred = torch.cat(preds, dim=0).numpy()
+    target = torch.cat(targets, dim=0).numpy()
+
+    return roc_auc_score(target, pred)
+
+
+if __name__ == "__main__":
+    if "LOCAL_RANK" not in os.environ:
+        warnings.warn("This script should be run with 'torchrun`.  Exiting.")
+        exit()
+
+    parser = ArgumentParser()
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--epochs", type=int, default=16)
+    parser.add_argument("--dataset_root", type=str, default="datasets")
+    parser.add_argument("--skip_partition", action="store_true")
+    args = parser.parse_args()
+
+    dataset_name = "movielens"
+
+    torch.distributed.init_process_group("nccl", timeout=timedelta(seconds=3600))
+    world_size = torch.distributed.get_world_size()
+    global_rank = torch.distributed.get_rank()
+    local_rank = int(os.environ["LOCAL_RANK"])
+    device = torch.device(local_rank)
+
+    # Create the uid needed for cuGraph comms
+    if global_rank == 0:
+        from pylibcugraph.comms import (
+            cugraph_comms_create_unique_id,
+        )
+
+        cugraph_id = [cugraph_comms_create_unique_id()]
+    else:
+        cugraph_id = [None]
+    torch.distributed.broadcast_object_list(cugraph_id, src=0, device=device)
+    cugraph_id = cugraph_id[0]
+
+    init_pytorch_worker(global_rank, local_rank, world_size, cugraph_id)
+
+    from rmm.allocators.torch import rmm_torch_allocator
+
+    with torch.cuda.use_mem_pool(torch.cuda.MemPool(rmm_torch_allocator.allocator())):
+        # Split the data
+        edge_path = os.path.join(args.dataset_root, dataset_name + "_eix_part")
+        features_path = os.path.join(args.dataset_root, dataset_name + "_feat")
+        meta_path = os.path.join(args.dataset_root, dataset_name + "_meta.json")
+
+        if not args.skip_partition and global_rank == 0:
+            print("Partitioning data...")
+
+            # WARNING: The following code loads the entire MovieLens dataset into rank 0's memory.
+            # The dataset includes movie titles and descriptions which are embedded using
+            # a transformer model, significantly increasing memory requirements.
+            # Ensure you have sufficient RAM (typically 8+ GB).
+            dataset = MovieLens(args.dataset_root, model_name="all-MiniLM-L6-v2")
+            data = dataset[0]
+
+            # Partition and distribute the data across all ranks.
+            preprocess_and_partition(
+                data,
+                edge_path=edge_path,
+                features_path=features_path,
+                meta_path=meta_path,
+            )
+            print("Data partitioning complete!")
+
+        torch.distributed.barrier()
+        data, label_dict = load_partitions(
+            edge_path=edge_path, features_path=features_path, meta_path=meta_path
+        )
+        torch.distributed.barrier()
+
+        feature_store, graph_store = cugraph_pyg_from_heterodata(data)
+        eli_train = data["user", "rates", "movie"].edge_index[:, label_dict["train"]]
+        eli_test = data["user", "rates", "movie"].edge_index[:, label_dict["test"]]
+        time_train = data["user", "rates", "movie"].time[label_dict["train"]]
+        num_nodes = {"user": data["user"].num_nodes, "movie": data["movie"].num_nodes}
+
+        # Set node times to 0
+        feature_store["user", "time", None] = torch.tensor_split(
+            torch.zeros(data["user"].num_nodes, dtype=torch.int64, device=device),
+            world_size,
+        )[global_rank]
+        feature_store["movie", "time", None] = torch.tensor_split(
+            torch.zeros(data["movie"].num_nodes, dtype=torch.int64, device=device),
+            world_size,
+        )[global_rank]
+
+        # Extract feature dimensions
+        num_features = {
+            "user": data["user"].x.shape[-1] if data["user"].x is not None else 1,
+            "movie": data["movie"].x.shape[-1] if data["movie"].x is not None else 1,
+        }
+
+        metadata = data.metadata()
+        del data
+
+        kwargs = dict(
+            data=(feature_store, graph_store),
+            num_neighbors={
+                ("user", "rates", "movie"): [5, 5, 5],
+                ("movie", "rev_rates", "user"): [5, 5, 5],
+            },
+            batch_size=256,
+            shuffle=True,
+            drop_last=True,
+        )
+
+        from cugraph_pyg.loader import LinkNeighborLoader
+
+        train_loader = LinkNeighborLoader(
+            edge_label_index=(("user", "rates", "movie"), eli_train),
+            edge_label_time=time_train - 1,  # No leakage.
+            time_attr="time",
+            neg_sampling=dict(mode="binary", amount=2),
+            **kwargs,
+        )
+
+        # Will raise a warning each epoch since we're not using the time attributes
+        # in this loader. This is expected behavior since lazy graph creation results
+        # in both loaders using the same graph.
+        test_loader = LinkNeighborLoader(
+            edge_label_index=(("user", "rates", "movie"), eli_test),
+            neg_sampling=dict(mode="binary", amount=1),
+            **kwargs,
+        )
+
+        sparse_size = (num_nodes["user"], num_nodes["movie"])
+        test_edge_label_index = EdgeIndex(
+            eli_test.to(device),
+            sparse_size=sparse_size,
+        ).sort_by("row")[0]
+        test_exclude_links = EdgeIndex(
+            eli_test.to(device),
+            sparse_size=sparse_size,
+        ).sort_by("row")[0]
+
+        model = Model(
+            hidden_channels=64, metadata=metadata, num_features=num_features
+        ).to(device)
+
+        model = DDP(model, device_ids=[local_rank])
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+        for epoch in range(1, args.epochs + 1):
+            train_loss = train(train_loader, model, optimizer)
+            print(f"Epoch: {epoch:02d}, Loss: {train_loss:.4f}")
+            auc = test(test_loader, model)
+            print(f"Test AUC: {auc:.4f} ")
+
+    from pylibcugraph.comms import cugraph_comms_shutdown
+
+    cugraph_comms_shutdown()
+    wg_finalize()

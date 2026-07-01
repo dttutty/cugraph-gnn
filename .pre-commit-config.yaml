@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: Apache-2.0
 
 ## https://pre-commit.com/
@@ -19,18 +19,14 @@ repos:
     rev: v0.14.3
     hooks:
       - id: ruff-check
-        args: [--fix, --config, "pyproject.toml"]
+        args: [--fix]
       - id: ruff-format
-        args: [--config, "pyproject.toml"]
   - repo: https://github.com/asottile/yesqa
     rev: v1.3.0
     hooks:
       - id: yesqa
         additional_dependencies:
           - flake8==7.1.1
-        exclude: |
-          (?x)
-            python/pylibwholegraph/pylibwholegraph/_doctor_check[.]py$
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v20.1.8
     hooks:
@@ -41,23 +37,56 @@ repos:
     rev: v1.3.3
     hooks:
       - id: verify-copyright
+        name: verify-copyright-cugraph
         args: [--fix, --spdx]
         files: |
           (?x)
-            [.](cmake|cpp|cu|cuh|h|hpp|sh|pxd|py|pyx)$|
+            [.](cmake|c|cpp|cu|cuh|h|hpp|sh|pxd|py|pyx|rs|java)$|
             CMakeLists[.]txt$|
             CMakeLists_standalone[.]txt$|
             [.]flake8[.]cython$|
             meta[.]yaml$|
             setup[.]cfg$|
-            dependencies[.]yaml$|
-            ^[.]pre-commit-config[.]yaml$|
-            pyproject[.]toml$|
-            recipe[.]yaml$|
             pytest[.]ini$|
-            [.]flake8$|
-            [.]coveragerc$
+            pyproject[.]toml$|
+            dependencies[.]yaml$|
+            recipe[.]yaml$|
+            ^[.]pre-commit-config[.]yaml$|
+            ^benchmarks/shared/build_cugraph_ucx/cugraph_ucx[.]dockerfile$|
+            ^[.]github/ISSUE_TEMPLATE/.*[.]yml$|
+            [.]flake8$
+        exclude: |
+          (?x)^(
+            python/cugraph/cugraph/tests/structure/test_hypergraph[.]py$|
+            python/cugraph/cugraph/structure/hypergraph[.]py$|
+            cpp/src/generators/scramble[.]cuh$|
+            cpp/tests/utilities/cxxopts[.]hpp$
+          )
+      - id: verify-copyright
+        name: verify-copyright-pygraphistry
+        args: [--fix, --spdx, "--spdx-license-identifier=Apache-2.0 AND BSD-3-Clause"]
+        files: |
+          (?x)^(
+            python/cugraph/cugraph/tests/structure/test_hypergraph[.]py$|
+            python/cugraph/cugraph/structure/hypergraph[.]py$
+          )
+      - id: verify-copyright
+        name: verify-copyright-iu
+        args: [--fix, --spdx, "--spdx-license-identifier=Apache-2.0 AND BSL-1.0"]
+        files: |
+          (?x)^(
+            cpp/src/generators/scramble[.]cuh$
+          )
+      - id: verify-copyright
+        name: verify-copyright-cxxopts
+        args: [--fix, --spdx, "--spdx-license-identifier=Apache-2.0 AND MIT"]
+        files: |
+          (?x)^(
+            cpp/tests/utilities/cxxopts[.]hpp$
+          )
       - id: verify-alpha-spec
+      - id: verify-codeowners
+        args: [--fix, --project-prefix=cugraph]
       - id: verify-hardcoded-version
         exclude: |
           (?x)
@@ -69,46 +98,29 @@ repos:
             ^[.]pre-commit-config[.]yaml$|
             [.]rst$|
             ^conda/environments/|
-            ^python/cugraph-pyg/conda/|
-            [.](png)$|
-            RAPIDS_BRANCH$
+            RAPIDS_BRANCH|
+            [.](png)$
       - id: verify-pyproject-license
         # ignore the top-level pyproject.toml, which doesn't
         # have or need a [project] table
         exclude: |
           (?x)
             ^pyproject[.]toml$
+  - repo: https://github.com/sphinx-contrib/sphinx-lint
+    rev: v1.0.0
+    hooks:
+      - id: sphinx-lint
+        args: ["--enable=all", "--disable=line-too-long"]
   - repo: https://github.com/rapidsai/dependency-file-generator
     rev: v1.20.0
     hooks:
         - id: rapids-dependency-file-generator
           args: ["--clean", "--warn-all", "--strict"]
-  - repo: local
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
     hooks:
-        - id: cmake-format
-          name: cmake-format
-          entry: ./cpp/scripts/run-cmake-format.sh cmake-format
-          language: python
-          types: [cmake]
-          #exclude: .*/thirdparty/.*
-          # Note that pre-commit autoupdate does not update the versions
-          # of dependencies, so we'll have to update this manually.
-          additional_dependencies:
-            - cmakelang==0.6.13
-          verbose: true
-          require_serial: true
-        - id: cmake-lint
-          name: cmake-lint
-          entry: ./cpp/scripts/run-cmake-format.sh cmake-lint
-          language: python
-          types: [cmake]
-          #exclude: .*/thirdparty/.*
-          # Note that pre-commit autoupdate does not update the versions
-          # of dependencies, so we'll have to update this manually.
-          additional_dependencies:
-            - cmakelang==0.6.13
-          verbose: true
-          require_serial: true
+      - id: shellcheck
+        args: ["--severity=warning"]
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
     rev: v1.24.1
     hooks:

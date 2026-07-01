@@ -47,14 +47,14 @@ void MultiProcessRun(int world_size, std::function<void(int, int)> f, bool inlin
   int current_running_count = running_count.fetch_add(1);
   if (current_running_count > 0 || is_child) {
     if (!is_child) running_count.fetch_sub(1);
-    WHOLEMEMORY_FATAL("Already have MultiProcessRun, running_count=%d, %s child process",
+    WHOLEGRAPH_FATAL("Already have MultiProcessRun, running_count=%d, %s child process",
                       current_running_count,
                       is_child ? "is" : "not");
   }
   for (; child_idx < world_size; child_idx++) {
     pids[child_idx] = fork();
     if (pids[child_idx] == -1) {
-      WHOLEMEMORY_ERROR("fork failed.");
+      WHOLEGRAPH_ERROR("fork failed.");
       break;
     }
     if (pids[child_idx] == 0) {
@@ -70,19 +70,19 @@ void MultiProcessRun(int world_size, std::function<void(int, int)> f, bool inlin
       int wstatus;
       pid_t pid_ret = waitpid(pids[i], &wstatus, 0);
     }
-    WHOLEMEMORY_FATAL("MultiProcessRun failed.");
+    WHOLEGRAPH_FATAL("MultiProcessRun failed.");
   }
   for (int i = 0; i < world_size; i++) {
     int wstatus;
     pid_t pid_ret = waitpid(pids[i], &wstatus, 0);
     if (pid_ret != pids[i]) {
       running_count.fetch_sub(1);
-      WHOLEMEMORY_FATAL(
+      WHOLEGRAPH_FATAL(
         "Rank %d returned pid %d not equal to pid %d", i, (int)pid_ret, (int)pids[i]);
     }
     if ((!WIFEXITED(wstatus)) || (WEXITSTATUS(wstatus) != 0)) {
       running_count.fetch_sub(1);
-      WHOLEMEMORY_FATAL("Rank %d exit with error", i);
+      WHOLEGRAPH_FATAL("Rank %d exit with error", i);
     }
   }
   running_count.fetch_sub(1);
@@ -138,18 +138,18 @@ void SideBandCommunicator::Start()
   SingleSend(client_fd_, &send_data[0], sizeof(int) * 2);
   int magic_number = 0;
   SingleRecv(client_fd_, &magic_number, sizeof(int));
-  WHOLEMEMORY_CHECK_NOTHROW(magic_number == kSideBandMagic);
+  WHOLEGRAPH_CHECK_NOTHROW(magic_number == kSideBandMagic);
   if (world_rank_ == 0) { server_accept_thread.join(); }
-  WHOLEMEMORY_INFO("[Client] Rank=%d connected to server.", world_rank_);
+  WHOLEGRAPH_INFO("[Client] Rank=%d connected to server.", world_rank_);
 }
 
 void SideBandCommunicator::Stop()
 {
-  WHOLEMEMORY_CHECK_NOTHROW(close(client_fd_) == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(close(client_fd_) == 0);
   client_fd_ = -1;
   if (world_rank_ == 0) {
     for (int i = 0; i < world_size_; i++) {
-      WHOLEMEMORY_CHECK_NOTHROW(close(server_fds_[i]) == 0);
+      WHOLEGRAPH_CHECK_NOTHROW(close(server_fds_[i]) == 0);
       server_fds_[i] = -1;
     }
     server_fds_.clear();
@@ -173,17 +173,17 @@ void SideBandCommunicator::ServerAcceptFunc()
     if (client_sock >= 0) {
       int recv_data[2];
       SingleRecv(client_sock, &recv_data[0], sizeof(int) * 2);
-      WHOLEMEMORY_CHECK_NOTHROW(recv_data[0] == kSideBandMagic);
+      WHOLEGRAPH_CHECK_NOTHROW(recv_data[0] == kSideBandMagic);
       int rank_id = recv_data[1];
-      WHOLEMEMORY_CHECK_NOTHROW(rank_id >= 0 && rank_id < world_size_);
-      WHOLEMEMORY_CHECK_NOTHROW(unconnected_rank_set.count(rank_id) > 0);
+      WHOLEGRAPH_CHECK_NOTHROW(rank_id >= 0 && rank_id < world_size_);
+      WHOLEGRAPH_CHECK_NOTHROW(unconnected_rank_set.count(rank_id) > 0);
       server_fds_[rank_id] = client_sock;
       unconnected_rank_set.erase(rank_id);
-      WHOLEMEMORY_INFO("[Server] Rank %d connected to SideBandCommunicator", rank_id);
+      WHOLEGRAPH_INFO("[Server] Rank %d connected to SideBandCommunicator", rank_id);
     }
   }
-  WHOLEMEMORY_CHECK_NOTHROW(close(server_listen_fd) == 0);
-  WHOLEMEMORY_INFO("[Server] All ranks connected to SideBandCommunicator");
+  WHOLEGRAPH_CHECK_NOTHROW(close(server_listen_fd) == 0);
+  WHOLEGRAPH_INFO("[Server] All ranks connected to SideBandCommunicator");
   for (int i = 0; i < world_size_; i++) {
     int send_data[2];
     send_data[0] = kSideBandMagic;
@@ -197,7 +197,7 @@ void SideBandCommunicator::GroupAllToAll(const void* input,
                                          size_t element_size,
                                          int group_count)
 {
-  WHOLEMEMORY_CHECK_NOTHROW(world_size_ % group_count == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(world_size_ % group_count == 0);
   int group_size = world_size_ / group_count;
   SingleSend(client_fd_, input, element_size * group_size);
   if (world_rank_ == 0) {
@@ -231,7 +231,7 @@ void SideBandCommunicator::GroupAllGather(const void* input,
                                           size_t element_size,
                                           int group_count)
 {
-  WHOLEMEMORY_CHECK_NOTHROW(world_size_ % group_count == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(world_size_ % group_count == 0);
   int group_size = world_size_ / group_count;
   SingleSend(client_fd_, input, element_size);
   if (world_rank_ == 0) {
@@ -263,7 +263,7 @@ void SideBandCommunicator::GroupBroadcast(void* data,
                                           int root_group_rank,
                                           int group_count)
 {
-  WHOLEMEMORY_CHECK_NOTHROW(world_size_ % group_count == 0);
+  WHOLEGRAPH_CHECK_NOTHROW(world_size_ % group_count == 0);
   int group_size = world_size_ / group_count;
   int group_rank = world_rank_ % group_size;
   if (group_rank == root_group_rank) { SingleSend(client_fd_, data, element_size); }
@@ -334,31 +334,31 @@ int ForkGetDeviceCount()
   if (s_device_count >= 0) { return s_device_count; }
   int pipes[2];
   if (pipe(pipes) == -1) {
-    WHOLEMEMORY_ERROR("Create pipe failed.");
+    WHOLEGRAPH_ERROR("Create pipe failed.");
     return -1;
   }
   pid_t pid = fork();
   if (pid == -1) {
-    WHOLEMEMORY_ERROR("fork failed.");
+    WHOLEGRAPH_ERROR("fork failed.");
     return -1;
   }
   if (pid == 0) {
     int dev_count = -1;
-    WM_CUDA_CHECK(cudaGetDeviceCount(&dev_count));
-    WHOLEMEMORY_CHECK(close(pipes[0]) == 0);
+    WG_CUDA_CHECK(cudaGetDeviceCount(&dev_count));
+    WHOLEGRAPH_CHECK(close(pipes[0]) == 0);
     auto wret = write(pipes[1], &dev_count, sizeof(int));
-    if (wret != sizeof(int)) { WHOLEMEMORY_FATAL("write dev_count to pipe failed."); }
-    WHOLEMEMORY_CHECK(close(pipes[1]) == 0);
+    if (wret != sizeof(int)) { WHOLEGRAPH_FATAL("write dev_count to pipe failed."); }
+    WHOLEGRAPH_CHECK(close(pipes[1]) == 0);
     exit(0);
   } else {
     int dev_count = -1;
-    WHOLEMEMORY_CHECK(close(pipes[1]) == 0);
+    WHOLEGRAPH_CHECK(close(pipes[1]) == 0);
     auto rret = read(pipes[0], &dev_count, sizeof(int));
-    if (rret != sizeof(int)) { WHOLEMEMORY_FATAL("read dev_count from pipe failed."); }
-    WHOLEMEMORY_CHECK(close(pipes[0]) == 0);
+    if (rret != sizeof(int)) { WHOLEGRAPH_FATAL("read dev_count from pipe failed."); }
+    WHOLEGRAPH_CHECK(close(pipes[0]) == 0);
     int wstatus;
     pid_t pid_ret = waitpid(pid, &wstatus, 0);
-    if (pid_ret != pid) { WHOLEMEMORY_FATAL("wait dev_count process failed."); }
+    if (pid_ret != pid) { WHOLEGRAPH_FATAL("wait dev_count process failed."); }
     s_device_count = dev_count;
     return dev_count;
   }

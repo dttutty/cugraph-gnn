@@ -32,10 +32,6 @@ option(CMAKE_CUDA_LINEINFO
        "Enable the -lineinfo option for nvcc (useful for cuda-memcheck / profiler" OFF
 )
 option(BUILD_TESTS "Configure CMake to build tests" ON)
-option(BUILD_WITH_NVSHMEM "Enable nvshmem integration" OFF)
-option(WHOLEGRAPH_EXCLUDE_NVSHMEM_FROM_ALL "Exclude nvshmem targets from wholeGraph's 'all' target"
-       ON
-)
 option(BUILD_BENCHMARKS "Configure CMake to build benchmark" ON)
 option(USE_NCCL_RUNTIME_WHEEL "Use the NCCL wheel at runtime instead of the system library" OFF)
 
@@ -105,20 +101,17 @@ endif()
 
 rapids_cpm_init()
 
-include(./cmake/thirdparty/get_raft.cmake)
-include(./cmake/thirdparty/get_nccl.cmake)
-if(BUILD_WITH_NVSHMEM)
-  include(./cmake/thirdparty/get_nvshmem.cmake)
-endif()
+include(cmake/thirdparty/get_raft.cmake)
+include(cmake/thirdparty/get_nccl.cmake)
 
 file(
   GLOB
   WHOLEGRAPH_SOURCES
   "src/*.cpp"
-  "src/wholememory/*.cpp"
-  "src/wholememory_ops/*.cpp"
-  "src/wholememory_ops/*.cu"
-  "src/wholememory_ops/functions/*.cu"
+  "src/wholegraph/*.cpp"
+  "src/wholegraph_tensor_ops/*.cpp"
+  "src/wholegraph_tensor_ops/*.cu"
+  "src/wholegraph_tensor_ops/functions/*.cu"
   "src/wholegraph_ops/*.cpp"
   "src/wholegraph_ops/*.cu"
   "src/graph_ops/*.cu"
@@ -176,14 +169,6 @@ if(CUDAToolkit_VERSION VERSION_GREATER "12.3")
   target_link_libraries(wholegraph PRIVATE CUDA::nvml)
 endif()
 
-if(BUILD_WITH_NVSHMEM)
-
-  file(GLOB_RECURSE NVSHMEM_SOURCE_FILES "src/wholememory_ops/functions/nvshmem*.cu")
-  set_source_files_properties(${NVSHMEM_SOURCE_FILES} PROPERTIES COMPILE_FLAGS "-rdc=true")
-  target_compile_definitions(wholegraph PRIVATE WITH_NVSHMEM_SUPPORT)
-  target_link_libraries(wholegraph PRIVATE nvshmem::nvshmem_host nvshmem::nvshmem_device)
-endif()
-
 # optionally build tests
 if(BUILD_TESTS AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   include(${rapids-cmake-dir}/cpm/gtest.cmake)
@@ -191,21 +176,6 @@ if(BUILD_TESTS AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   include(CTest) # calls enable_testing()
 
   add_subdirectory(tests)
-endif()
-
-if(BUILD_WITH_NVSHMEM)
-  get_target_property(NVSHMEM_BINARY_DIR nvshmem BINARY_DIR)
-  add_library(nvshmem_wholememory_bootstrap SHARED)
-  target_sources(
-    nvshmem_wholememory_bootstrap PRIVATE src/nvshmem_plugins/nvshmem_wholememory_bootstrap.cpp
-  )
-  target_link_libraries(nvshmem_wholememory_bootstrap PRIVATE wholegraph nvshmem::nvshmem_host)
-  target_include_directories(
-    nvshmem_wholememory_bootstrap
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${NVSHMEM_BINARY_DIR}/include/modules/common
-            ${NVSHMEM_BINARY_DIR}/include/modules/bootstrap
-  )
-
 endif()
 
 # optionally build benchmark
@@ -224,16 +194,16 @@ set(code_string [=[
 )
 
 set(WHOLEGRAPH_PUBLIC_HEADERS
-    wholememory/device_reference.cuh
-    wholememory/embedding.h
-    wholememory/env_func_ptrs.h
-    wholememory/global_reference.h
-    wholememory/tensor_description.h
-    wholememory/wholememory.h
-    wholememory/wholememory_tensor.h
-    wholememory/wholememory_op.h
-    wholememory/wholegraph_op.h
-    wholememory/graph_op.h
+    wholegraph/device_reference.cuh
+    wholegraph/embedding.h
+    wholegraph/env_func_ptrs.h
+    wholegraph/global_reference.h
+    wholegraph/tensor_description.h
+    wholegraph/wholegraph.h
+    wholegraph/wholegraph_tensor.h
+    wholegraph/wholegraph_tensor_op.h
+    wholegraph/wholegraph_op.h
+    wholegraph/graph_op.h
 )
 
 foreach(file IN LISTS WHOLEGRAPH_PUBLIC_HEADERS)
@@ -249,9 +219,6 @@ set(PROGRAM_PERMISSIONS_DEFAULT OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ 
 )
 
 set(WHOLEGRAPH_INSTALL_LIBS wholegraph)
-if(BUILD_WITH_NVSHMEM)
-  list(APPEND WHOLEGRAPH_INSTALL_LIBS nvshmem_wholememory_bootstrap nvshmem_host)
-endif()
 
 install(
   TARGETS ${WHOLEGRAPH_INSTALL_LIBS}
@@ -278,22 +245,3 @@ rapids_export(
   DOCUMENTATION doc_string
   FINAL_CODE_BLOCK code_string
 )
-
-# ##################################################################################################
-# * make documentation --------------------------------------------------------- requires doxygen
-#   and graphviz to be installed from build directory, run make doxygen
-
-# ##################################################################################################
-# * doxygen docs -------------------------------------------------------------
-
-find_package(Doxygen 1.8.11)
-if(Doxygen_FOUND)
-  add_custom_command(
-    OUTPUT WHOLEGRAPH_DOXYGEN
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND doxygen Doxyfile
-    VERBATIM
-  )
-
-  add_custom_target(doxygen DEPENDS WHOLEGRAPH_DOXYGEN)
-endif()
