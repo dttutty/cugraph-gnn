@@ -91,3 +91,4 @@ dask-worker-space/
 # clang tooling
 compile_commands.json
 .clangd/
+uv.lock

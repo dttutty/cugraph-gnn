@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# Order matters: the last matching pattern wins.
+
+# Native WholeGraph runtime
+/cpp/                                  @rapidsai/wholegraph-cpp-codeowners
+
+# Python package owners
+/python/cugraph-pyg/                   @rapidsai/cugraph-gnn-python-codeowners
+/python/pylibwholegraph/               @rapidsai/wholegraph-python-codeowners
+/python/wholegraph-torch/              @rapidsai/wholegraph-python-codeowners
+/python/libwholegraph/                 @rapidsai/wholegraph-python-codeowners
+
+# Documentation and examples
+/README.md                             @rapidsai/cugraph-doc-codeowners
+/readme_pages/                         @rapidsai/cugraph-doc-codeowners
+/cpp/docs/                             @rapidsai/cugraph-doc-codeowners
+
+# CI and developer tooling
+/.github/                              @rapidsai/ci-codeowners
+/ci/                                   @rapidsai/ci-codeowners
+/.coveragerc                           @rapidsai/ci-codeowners
+/.pre-commit-config.yaml               @rapidsai/ci-codeowners
+/print_env.sh                          @rapidsai/ci-codeowners
+
+# Packaging and dependency metadata
+/conda/                                @rapidsai/packaging-codeowners
+/dependencies.yaml                     @rapidsai/packaging-codeowners
+/build.sh                              @rapidsai/packaging-codeowners
+/pyproject.toml                        @rapidsai/packaging-codeowners
+/VERSION                               @rapidsai/packaging-codeowners
+
+# Security policy
+/SECURITY.md                           @rapidsai/ops-codeowners
