@@ -62,3 +62,9 @@ export LD_PRELOAD=$CONDA_PREFIX/lib/libnccl.so.2
 Always clean up cuGraph comms, WholeGraph, and `torch.distributed` in a
 `finally` block for spawned MG tests. A failed assertion on one rank can
 otherwise leave another rank blocked in a collective.
+
+## Developer Docs
+
+- [Contributing](readme_pages/CONTRIBUTING.md)
+- [Build, test, and package](readme_pages/build_test_package.md)
+- [WholeGraph C++ developer guide](cpp/docs/DEVELOPER_GUIDE.md)

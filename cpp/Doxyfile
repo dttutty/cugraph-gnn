@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+
+PROJECT_NAME           = "WholeGraph"
+PROJECT_BRIEF          = "Native WholeGraph runtime for cuGraph GNN packages"
+OUTPUT_DIRECTORY       = doxygen
+GENERATE_HTML          = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+INPUT                  = include src tests docs doxygen/main_page.md
+FILE_PATTERNS          = *.h *.hpp *.cuh *.cpp *.cu *.md
+RECURSIVE              = YES
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+WARN_IF_UNDOCUMENTED   = NO
+QUIET                  = YES
