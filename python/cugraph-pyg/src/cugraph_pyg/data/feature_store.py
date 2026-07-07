@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import warnings
 
 from typing import Optional, Tuple, List
@@ -185,8 +186,39 @@ class FeatureStore(
         if ix.dim() != 1:
             raise ValueError("Index must be 1D")
 
-        tx[ix] = tensor.cpu().clone(memory_format=torch.contiguous_format).pin_memory()
-        torch.cuda.synchronize()
+        chunk_rows = int(os.getenv("CUGRAPH_PYG_FEATURE_STORE_PUT_CHUNK_ROWS", "0"))
+        if chunk_rows > 0 and tensor.shape[0] > chunk_rows:
+            local_chunks = (int(tensor.shape[0]) + chunk_rows - 1) // chunk_rows
+            global_chunks = local_chunks
+            if torch.distributed.is_initialized():
+                chunk_count = torch.tensor(
+                    [local_chunks], device="cuda", dtype=torch.int64
+                )
+                torch.distributed.all_reduce(
+                    chunk_count,
+                    op=torch.distributed.ReduceOp.MAX,
+                )
+                global_chunks = int(chunk_count.item())
+
+            for chunk_id in range(global_chunks):
+                start = chunk_id * chunk_rows
+                stop = min(start + chunk_rows, int(tensor.shape[0]))
+                rows = max(0, stop - start)
+                chunk_ix = ix.narrow(0, start, rows) if rows else ix.narrow(0, 0, 0)
+                chunk_tensor = (
+                    tensor.narrow(0, start, rows)
+                    if rows
+                    else tensor.narrow(0, 0, 0)
+                )
+                tx[chunk_ix] = chunk_tensor.cpu().clone(
+                    memory_format=torch.contiguous_format
+                ).pin_memory()
+                torch.cuda.synchronize()
+        else:
+            tx[ix] = tensor.cpu().clone(
+                memory_format=torch.contiguous_format
+            ).pin_memory()
+            torch.cuda.synchronize()
         torch.distributed.barrier()
         return tx
 
