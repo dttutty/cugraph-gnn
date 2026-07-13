@@ -37,6 +37,8 @@ def run_test_dist_matrix_creation(rank, world_size, device):
     assert dist_matrix.shape == (1000, 1000)
     assert dist_matrix.dtype == torch.long
     assert dist_matrix._format == "coo"
+    assert torch.equal(dist_matrix.local_col, torch.tensor_split(col, world_size)[rank])
+    assert torch.equal(dist_matrix.local_row, torch.tensor_split(row, world_size)[rank])
 
     torch.distributed.barrier()
 

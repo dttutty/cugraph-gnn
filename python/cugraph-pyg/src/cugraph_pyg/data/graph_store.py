@@ -449,20 +449,22 @@ class GraphStore(
         # i.e. (author, writes, paper): [[0,1,2],[2,0,1]] is referring to a
         # cuGraph graph where (paper 2) -> (author 0), (paper 0) -> (author 1),
         # and (paper 1) -> (author 0)
-        edge_index = torch.concat(
-            [
-                torch.stack(
-                    [
-                        self.__edge_indices[dst_type, rel_type, src_type].local_col
-                        + self._vertex_offsets[dst_type],
-                        self.__edge_indices[dst_type, rel_type, src_type].local_row
-                        + self._vertex_offsets[src_type],
-                    ]
-                )
-                for (dst_type, rel_type, src_type) in sorted_keys
-            ],
-            axis=1,
-        ).cuda()
+        def apply_vertex_offset(tensor, offset):
+            return tensor if offset == 0 else tensor + offset
+
+        dst_parts = []
+        src_parts = []
+        for dst_type, rel_type, src_type in sorted_keys:
+            matrix = self.__edge_indices[dst_type, rel_type, src_type]
+            dst_parts.append(
+                apply_vertex_offset(matrix.local_col, self._vertex_offsets[dst_type])
+            )
+            src_parts.append(
+                apply_vertex_offset(matrix.local_row, self._vertex_offsets[src_type])
+            )
+
+        dst_array = dst_parts[0] if len(dst_parts) == 1 else torch.concat(dst_parts)
+        src_array = src_parts[0] if len(src_parts) == 1 else torch.concat(src_parts)
 
         edge_type_array = torch.arange(
             len(sorted_keys), dtype=torch.int32, device="cuda"
@@ -509,8 +511,8 @@ class GraphStore(
         )
 
         d = {
-            "dst": edge_index[0],
-            "src": edge_index[1],
+            "dst": dst_array,
+            "src": src_array,
             "etp": edge_type_array,
             "eid": edge_id_array,
         }
