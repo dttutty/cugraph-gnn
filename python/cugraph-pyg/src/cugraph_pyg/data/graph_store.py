@@ -454,14 +454,17 @@ class GraphStore(
 
         dst_parts = []
         src_parts = []
+        local_edge_counts = []
         for dst_type, rel_type, src_type in sorted_keys:
             matrix = self.__edge_indices[dst_type, rel_type, src_type]
+            local_col, local_row = matrix.get_local_tensor()
             dst_parts.append(
-                apply_vertex_offset(matrix.local_col, self._vertex_offsets[dst_type])
+                apply_vertex_offset(local_col, self._vertex_offsets[dst_type])
             )
             src_parts.append(
-                apply_vertex_offset(matrix.local_row, self._vertex_offsets[src_type])
+                apply_vertex_offset(local_row, self._vertex_offsets[src_type])
             )
+            local_edge_counts.append(local_row.numel())
 
         dst_array = dst_parts[0] if len(dst_parts) == 1 else torch.concat(dst_parts)
         src_array = src_parts[0] if len(src_parts) == 1 else torch.concat(src_parts)
@@ -470,14 +473,14 @@ class GraphStore(
             len(sorted_keys), dtype=torch.int32, device="cuda"
         ).repeat_interleave(
             torch.tensor(
-                [self.__edge_indices[et].local_row.numel() for et in sorted_keys],
+                local_edge_counts,
                 device="cuda",
                 dtype=torch.int64,
             )
         )
 
         num_edges_t = torch.tensor(
-            [self.__edge_indices[et].local_row.numel() for et in sorted_keys],
+            local_edge_counts,
             device="cuda",
         )
 

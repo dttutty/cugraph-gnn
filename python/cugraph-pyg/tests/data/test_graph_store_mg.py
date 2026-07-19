@@ -60,6 +60,18 @@ def run_test_graph_store_basic_api(rank, world_size):
             (KARATE_NUM_NODES, KARATE_NUM_NODES),
         )
 
+        # Graph construction can consume WholeMemory's physical local partition
+        # directly without changing the logical partition exposed by local_col and
+        # local_row.
+        edge_type = ("person", "knows", "person")
+        matrix = graph_store._GraphStore__edge_indices[edge_type]
+        local_col, local_row = matrix.get_local_tensor()
+        edgelist = graph_store._GraphStore__get_edgelist()
+        assert torch.equal(edgelist["dst"], local_col)
+        assert torch.equal(edgelist["src"], local_row)
+        assert edgelist["dst"].data_ptr() == local_col.data_ptr()
+        assert edgelist["src"].data_ptr() == local_row.data_ptr()
+
         # Verify the edge indices
         rei = graph_store.get_edge_index(("person", "knows", "person"), "coo")
 

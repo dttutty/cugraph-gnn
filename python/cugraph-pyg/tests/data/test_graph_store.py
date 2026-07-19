@@ -31,6 +31,15 @@ def test_graph_store_basic_api(single_pytorch_worker):
 
     assert (ei == rei).all()
 
+    edge_type = ("person", "knows", "person")
+    matrix = graph_store._GraphStore__edge_indices[edge_type]
+    local_col, local_row = matrix.get_local_tensor()
+    edgelist = graph_store._GraphStore__get_edgelist()
+    assert torch.equal(edgelist["dst"], dst)
+    assert torch.equal(edgelist["src"], src)
+    assert edgelist["dst"].data_ptr() == local_col.data_ptr()
+    assert edgelist["src"].data_ptr() == local_row.data_ptr()
+
     edge_attrs = graph_store.get_all_edge_attrs()
     assert len(edge_attrs) == 1
 
